@@ -1,0 +1,1715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d12">
+<title>Calorie &amp; Protein Tracker</title>
+<!-- PWA: these no-op harmlessly when the file is opened directly from disk -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Macros">
+<style>
+/* ============================================================
+   THEME & RESET
+   ============================================================ */
+:root {
+  --bg:        #0b0d12;
+  --surface:   #151a24;
+  --surface2:  #1f2634;
+  --surface3:  #293243;
+  --border:    rgba(255,255,255,.08);
+  --border-hi: rgba(255,255,255,.14);
+  --text:      #f4f6fb;
+  --muted:     #8d97ab;
+  --faint:     #667082;            /* recessive chart series */
+  --accent:    #5aa9ff;            /* the one accent color */
+  --green:     #34d399;
+  --green-hi:  #86efac;
+  --amber:     #fbbf24;
+  --red:       #f87171;
+  --radius:    16px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; overscroll-behavior-y: none; }
+/* Touch polish: no tap-highlight flash, no double-tap zoom on controls,
+   no accidental text selection while tapping around */
+body { -webkit-tap-highlight-color: transparent; }
+button, .chip, a { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  min-height: 100vh;
+}
+/* Soft accent glow behind the top of the page */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: radial-gradient(560px 300px at 50% -80px, rgba(90,169,255,.14), transparent 70%);
+}
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: none; }
+svg { display: block; }
+[hidden] { display: none !important; } /* keep `hidden` winning over display:flex rules */
+
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+/* ============================================================
+   LAYOUT / SECTION HEADERS / TAB BAR
+   ============================================================ */
+main {
+  position: relative; z-index: 1;
+  max-width: 620px;
+  margin: 0 auto;
+  /* top inset matters in installed-app (standalone) mode, where the page
+     draws under the iPhone status bar */
+  padding: calc(14px + env(safe-area-inset-top)) 14px calc(88px + env(safe-area-inset-bottom));
+}
+.screen-head { margin: 4px 2px 16px; }
+.screen-head h1 { font-size: 26px; font-weight: 800; letter-spacing: -.01em; }
+.screen-head .sub { font-size: 14px; color: var(--muted); margin-top: 2px; }
+.overline { font-size: 11.5px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .14em; }
+
+.sec-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin: 24px 2px 10px;
+}
+.sec-head h2 {
+  font-size: 12.5px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .1em;
+}
+.sec-link { font-size: 13.5px; font-weight: 600; color: var(--accent); display: inline-flex; align-items: center; gap: 2px; padding: 4px 2px; }
+
+#tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  background: rgba(17,21,29,.92);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border-top: 1px solid var(--border);
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+}
+#tabbar button {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  min-height: 52px; padding-top: 5px;
+  color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  border-radius: 12px;
+}
+#tabbar button[aria-current="true"] { color: var(--accent); }
+#tabbar svg { width: 23px; height: 23px; }
+
+#storage-banner {
+  position: relative; z-index: 1;
+  background: #4a3320; color: #ffd9a0;
+  padding: 10px 14px; font-size: 14px; text-align: center;
+}
+
+/* ============================================================
+   SHARED COMPONENTS
+   ============================================================ */
+.card {
+  background: linear-gradient(180deg, #171d29, #131822);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 30px rgba(0,0,0,.35);
+}
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 46px; padding: 10px 18px;
+  background: var(--surface2);
+  border: 1px solid var(--border-hi);
+  border-radius: 12px;
+  font-weight: 650; font-size: 15px;
+}
+.btn:hover { background: var(--surface3); }
+.btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+.btn-primary {
+  background: linear-gradient(180deg, #6cb4ff, #3d92f5);
+  border-color: transparent; color: #06131f;
+  box-shadow: 0 4px 14px rgba(90,169,255,.28);
+}
+.btn-primary:hover { background: linear-gradient(180deg, #7cbcff, #4a9bf7); }
+.btn-danger { background: none; border-color: rgba(247,113,113,.45); color: var(--red); }
+.btn-danger:hover { background: rgba(247,113,113,.08); }
+.btn-sm { min-height: 44px; min-width: 44px; padding: 6px 12px; font-size: 14px; border-radius: 10px; }
+.btn-block { width: 100%; }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; min-height: 44px;
+  color: var(--muted); border-radius: 10px;
+}
+.icon-btn:hover { color: var(--text); background: var(--surface2); }
+.icon-btn svg { width: 18px; height: 18px; }
+.nav-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--muted);
+}
+.nav-btn:hover:not(:disabled) { color: var(--text); border-color: var(--border-hi); }
+.nav-btn:disabled { opacity: .35; cursor: default; }
+.nav-btn svg { width: 20px; height: 20px; }
+
+.num { font-variant-numeric: tabular-nums; }
+.mut { color: var(--muted); }
+.empty-note { color: var(--muted); font-size: 14.5px; padding: 18px 8px; text-align: center; line-height: 1.5; }
+
+input[type="text"], input[type="number"], input[type="date"], select {
+  width: 100%;
+  min-height: 46px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid var(--border-hi);
+  border-radius: 11px;
+  padding: 9px 12px;
+  font-size: 16px; /* prevents iOS zoom-on-focus */
+  color: var(--text);
+  color-scheme: dark;
+}
+input:focus, select:focus { border-color: var(--accent); }
+input[aria-invalid="true"] { border-color: var(--red); }
+label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 5px; letter-spacing: .02em; }
+.field { margin-bottom: 12px; }
+.form-row { display: flex; gap: 10px; }
+.form-row .field { flex: 1; min-width: 0; }
+.check-row { display: flex; align-items: center; gap: 10px; }
+.check-row input[type="checkbox"] { width: 20px; height: 20px; min-height: 0; accent-color: var(--accent); }
+.check-row label { margin: 0; font-size: 15px; font-weight: 500; color: var(--text); }
+
+/* ============================================================
+   TODAY & DAY-DETAIL VIEWS
+   ============================================================ */
+.detail-nav { display: flex; align-items: center; gap: 8px; margin: 2px 0 14px; }
+.detail-nav .spacer { flex: 1; }
+
+/* The summary card: the two targets, big */
+.hero { padding: 20px 18px 18px; }
+.bar-block + .bar-block { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+.bar-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.bar-title { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.bar-nums { font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; line-height: 1; }
+.bar-nums .of { font-size: 15px; font-weight: 550; color: var(--muted); letter-spacing: 0; }
+
+.bar-track {
+  position: relative; height: 18px;
+  background: rgba(255,255,255,.055);
+  box-shadow: 0 1px 2px rgba(0,0,0,.4) inset;
+  border-radius: 9px;
+  overflow: hidden;
+}
+.bar-track.overflowing { overflow: visible; }
+.bar-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  border-radius: 9px;
+  transition: width .4s ease, background-color .4s ease;
+}
+.fill-green  { background: linear-gradient(180deg, #4be0a7, #22b57e); box-shadow: 0 0 14px rgba(52,211,153,.3); }
+.fill-amber  { background: linear-gradient(180deg, #fcd34d, #f0ab0f); box-shadow: 0 0 14px rgba(251,191,36,.3); }
+.fill-red    { background: linear-gradient(180deg, #fb8f8f, #ef5350); box-shadow: 0 0 14px rgba(247,113,113,.32); }
+.fill-faint  { background: linear-gradient(180deg, #77839a, #59637a); }
+.bar-overflow {
+  position: absolute; top: 0; bottom: 0;
+  background: linear-gradient(180deg, #b2f5cd, #6fe3a5);
+  box-shadow: 0 0 16px rgba(134,239,172,.45);
+  transition: width .4s ease, left .4s ease;
+}
+.bar-tick { position: absolute; top: -4px; bottom: -4px; width: 2.5px; border-radius: 2px; background: var(--text); }
+.bar-foot { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; }
+.bar-status { font-size: 14.5px; font-weight: 650; }
+.bar-pct { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.st-green { color: var(--green); }
+.st-amber { color: var(--amber); }
+.st-red   { color: var(--red); }
+.st-mut   { color: var(--muted); font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .bar-fill, .bar-overflow { transition: none; } }
+
+/* Quick-log grid */
+.chips { display: flex; gap: 7px; flex-wrap: wrap; margin: 0 0 12px; }
+.chip {
+  min-height: 38px; padding: 6px 16px;
+  background: var(--surface); border: 1px solid var(--border-hi);
+  border-radius: 999px; font-size: 14px; font-weight: 600; color: var(--muted);
+}
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #06131f; }
+.ql-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
+@media (min-width: 480px) { .ql-grid { grid-template-columns: repeat(3, 1fr); } }
+.meal-card {
+  display: flex; align-items: stretch;
+  background: linear-gradient(180deg, #1a2130, #161c29);
+  border: 1px solid var(--border);
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 1px 0 rgba(255,255,255,.04) inset;
+}
+.meal-log { flex: 1; min-width: 0; min-height: 62px; text-align: left; padding: 10px 6px 10px 13px; }
+.meal-log:hover, .meal-log:active { background: rgba(90,169,255,.07); }
+.meal-name {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  font-weight: 650; font-size: 14.5px; line-height: 1.25;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+.meal-macros { display: block; margin-top: 3px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.meal-macros b { color: var(--accent); font-weight: 650; }
+.meal-more {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 42px; border-left: 1px solid var(--border); color: var(--muted);
+}
+.meal-more:hover { color: var(--text); background: var(--surface2); }
+.meal-more svg { width: 17px; height: 17px; }
+.add-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  min-height: 62px; border-radius: 14px;
+  border: 1.5px dashed var(--border-hi); color: var(--muted);
+  font-size: 13.5px; font-weight: 650;
+}
+.add-tile:hover { color: var(--accent); border-color: var(--accent); background: rgba(90,169,255,.05); }
+.add-tile svg { width: 18px; height: 18px; }
+.qty-row {
+  grid-column: 1 / -1; display: flex; gap: 7px; align-items: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 7px;
+}
+.qty-row .mut { font-size: 13px; padding-left: 6px; flex-shrink: 0; }
+.qty-row .btn-sm { flex: 1; }
+.quicklog-empty { grid-column: 1 / -1; text-align: center; padding: 22px 14px; }
+.quicklog-empty p { color: var(--muted); font-size: 14.5px; margin-bottom: 14px; line-height: 1.5; }
+.qa-mount { grid-column: 1 / -1; }
+.qa-mount form { margin-top: 2px; }
+
+/* Day list (the logger: one row per day) */
+.day-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; min-height: 56px;
+  border-top: 1px solid var(--border);
+  padding: 9px 2px; text-align: left; font-size: 15px; color: var(--text);
+}
+.day-row:first-child { border-top: none; }
+.day-row:hover { background: rgba(255,255,255,.025); }
+.day-row .d-date { flex: 1; min-width: 0; font-weight: 650; }
+.day-row .d-date small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); margin-top: 1px; }
+.day-row .d-nums { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; text-align: right; line-height: 1.35; }
+.day-row .d-nums b { color: var(--text); font-weight: 700; font-size: 15px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.dots { display: inline-flex; gap: 5px; margin: 0 2px 0 6px; flex-shrink: 0; }
+.dot-green { background: var(--green); box-shadow: 0 0 6px rgba(52,211,153,.5); }
+.dot-red   { background: var(--red);   box-shadow: 0 0 6px rgba(247,113,113,.5); }
+.dot-grey  { background: var(--faint); }
+.chev { color: var(--muted); width: 16px; height: 16px; flex-shrink: 0; }
+
+/* Entry list (inside a day's detail) */
+.entry-row { display: flex; align-items: center; gap: 4px; padding: 9px 0; }
+.entry-row + .entry-row, .entry-row + .entry-edit, .entry-edit + .entry-row { border-top: 1px solid var(--border); }
+.entry-main { flex: 1; min-width: 0; }
+.entry-name {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  font-size: 15px; font-weight: 600; line-height: 1.3;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+.entry-qty { color: var(--accent); font-size: 13px; font-weight: 650; }
+.entry-time { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.entry-cal, .entry-pro { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.entry-cal { width: 64px; font-weight: 700; font-size: 15px; }
+.entry-cal small, .entry-pro small { font-size: 11px; color: var(--muted); font-weight: 500; }
+.entry-pro { width: 52px; color: var(--muted); font-size: 14px; }
+.entry-edit { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; }
+.entry-edit input { flex: 1; min-width: 62px; }
+.entry-edit .ee-name { flex: 2 1 100%; }
+.log-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   LIBRARY VIEW
+   ============================================================ */
+.lib-row { display: flex; align-items: center; gap: 6px; padding: 10px 0; }
+.lib-row + .lib-row, .lib-row + .lib-edit-form, .lib-edit-form + .lib-row { border-top: 1px solid var(--border); }
+.lib-info { flex: 1; min-width: 0; }
+.lib-name { font-weight: 650; font-size: 15.5px; }
+.lib-note { font-size: 13px; color: var(--muted); }
+.lib-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.tag-pill {
+  display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  color: var(--accent); background: rgba(90,169,255,.12);
+  border-radius: 6px; padding: 1.5px 7px; margin-right: 5px; text-transform: uppercase;
+}
+.lib-macros { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; font-size: 14.5px; font-weight: 650; line-height: 1.35; }
+.lib-macros .mut { font-weight: 500; font-size: 13px; }
+.lib-edit-form { padding: 12px 0; }
+
+/* ============================================================
+   WEEK VIEW
+   ============================================================ */
+.week-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 0 14px; }
+.week-nav-mid { text-align: center; min-width: 0; }
+#week-range { font-weight: 800; font-size: 20px; letter-spacing: -.01em; }
+.budget-big { font-size: 38px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; line-height: 1.1; }
+.budget-big .of { font-size: 15px; font-weight: 550; color: var(--muted); letter-spacing: 0; }
+.budget-track { position: relative; height: 10px; background: rgba(255,255,255,.055); border-radius: 5px; overflow: hidden; margin-top: 12px; }
+.budget-track .bar-fill { border-radius: 5px; }
+.budget-row { display: flex; justify-content: space-between; margin-top: 7px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.chart-title { font-size: 12.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 10px; }
+.week-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.week-table th { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; text-align: right; padding: 4px 4px 8px; }
+.week-table th:first-child { text-align: left; }
+.week-table td { padding: 8px 4px; text-align: right; border-top: 1px solid var(--border); font-size: 15px; }
+.week-table td:first-child { text-align: left; color: var(--muted); font-size: 14px; }
+.week-table tr.is-today td:first-child { color: var(--accent); font-weight: 700; }
+.week-table tr.sum-row td { font-weight: 750; border-top: 2px solid var(--border-hi); }
+.week-table tr.avg-row td { font-weight: 650; color: var(--muted); border-top: 1px solid var(--border); }
+.week-table td.over { color: var(--red); }
+.week-table td.hit  { color: var(--green); }
+.split-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.split-cell { background: linear-gradient(180deg,#171d29,#131822); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+.split-cell .lbl { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+.split-cell .val { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.split-cell .sub { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   WEIGHT VIEW
+   ============================================================ */
+.wt-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.wt-stat { background: linear-gradient(180deg,#171d29,#131822); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 8px; text-align: center; }
+.wt-stat .lbl { font-size: 11.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.wt-stat .val { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.wt-stat .val.main { color: var(--accent); }
+.wt-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.wt-row + .wt-row { border-top: 1px solid var(--border); }
+.wt-row .wt-date { flex: 1; color: var(--muted); font-weight: 500; font-size: 14.5px; }
+.wt-row .num { font-weight: 700; }
+
+/* ============================================================
+   SETTINGS VIEW
+   ============================================================ */
+.settings-actions { display: flex; flex-direction: column; gap: 10px; }
+.setting-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-top: -2px; }
+#save-note { color: var(--green); font-size: 14px; font-weight: 650; margin-left: 12px; }
+</style>
+</head>
+<body>
+
+<div id="storage-banner" hidden>⚠️ Storage unavailable — data will NOT persist after you close this page.</div>
+
+<main>
+
+  <!-- ==================== TODAY (dashboard + quick logging + day list) ==================== -->
+  <section id="view-today" aria-label="Today">
+    <header class="screen-head">
+      <div class="overline">Today</div>
+      <h1 id="today-title">–</h1>
+      <p class="sub" id="today-sub"></p>
+    </header>
+
+    <div class="card hero" id="bars"></div>
+
+    <div class="sec-head">
+      <h2>Log food</h2>
+      <button class="sec-link" data-act="goto-meals">Manage library ›</button>
+    </div>
+    <div class="chips" id="chips-today" hidden></div>
+    <div id="quicklog-grid" class="ql-grid">
+      <!-- meal tiles render here; the one-off form mounts into .qa-mount -->
+    </div>
+
+    <div class="sec-head">
+      <h2>Log</h2>
+      <span class="log-count" id="daylist-count"></span>
+    </div>
+    <div class="card" id="day-list"></div>
+  </section>
+
+  <!-- ==================== DAY DETAIL (drill-in from the log) ==================== -->
+  <section id="view-day" aria-label="Day detail" hidden>
+    <div class="detail-nav">
+      <button class="btn btn-sm" data-act="day-back">‹ Log</button>
+      <span class="spacer"></span>
+      <button class="nav-btn" data-act="day-prev" aria-label="Previous day"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6l-6 6 6 6"/></svg></button>
+      <button class="nav-btn" data-act="day-next" aria-label="Next day" id="day-next-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6l6 6-6 6"/></svg></button>
+    </div>
+    <header class="screen-head">
+      <div class="overline" id="dd-overline">Day</div>
+      <h1 id="dd-title">–</h1>
+      <p class="sub" id="dd-sub"></p>
+    </header>
+
+    <div class="card hero" id="detail-bars"></div>
+
+    <div class="sec-head">
+      <h2>Meals this day</h2>
+      <span class="log-count" id="log-count"></span>
+    </div>
+    <div class="card" id="entry-list"></div>
+
+    <div class="sec-head" style="margin-bottom:8px"><h2>Add food</h2></div>
+    <button class="btn btn-block" id="detail-add-toggle" data-act="detail-add-toggle" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      Add food to this day
+    </button>
+    <div id="detail-add" hidden style="margin-top:12px">
+      <div class="chips" id="chips-detail" hidden></div>
+      <div id="detail-quicklog" class="ql-grid"></div>
+    </div>
+  </section>
+
+  <!-- ==================== LIBRARY VIEW ==================== -->
+  <section id="view-library" aria-label="Meal library" hidden>
+    <header class="screen-head">
+      <h1>Meal library</h1>
+      <p class="sub">Meals you save here get one-tap logging on the Today screen.</p>
+    </header>
+
+    <button class="btn btn-primary btn-block" id="lib-add-toggle" aria-expanded="false" data-act="lib-add-toggle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      New meal
+    </button>
+    <form class="card" id="lib-form" hidden style="margin-top:10px">
+      <div class="field">
+        <label for="lib-name">Name</label>
+        <input type="text" id="lib-name" autocomplete="off" placeholder="e.g. Grilled chicken (8 oz)">
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="lib-cal">Calories</label>
+          <input type="number" id="lib-cal" min="0" step="any" inputmode="decimal" placeholder="0">
+        </div>
+        <div class="field">
+          <label for="lib-pro">Protein (g)</label>
+          <input type="number" id="lib-pro" min="0" step="any" inputmode="decimal" placeholder="0">
+        </div>
+      </div>
+      <div class="field">
+        <label for="lib-note">Note (e.g. serving size)</label>
+        <input type="text" id="lib-note" autocomplete="off" placeholder="optional">
+      </div>
+      <div class="field">
+        <label for="lib-tag">Meal slot (optional)</label>
+        <select id="lib-tag">
+          <option value="">None</option>
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch">Lunch</option>
+          <option value="dinner">Dinner</option>
+          <option value="snack">Snack</option>
+        </select>
+      </div>
+      <button class="btn btn-primary btn-block" type="submit">Save meal</button>
+    </form>
+
+    <div class="chips" id="chips-lib" hidden style="margin-top:14px"></div>
+    <div class="card" id="lib-list" style="margin-top:12px"></div>
+  </section>
+
+  <!-- ==================== WEEK VIEW ==================== -->
+  <section id="view-week" aria-label="Weekly view" hidden>
+    <div class="week-nav">
+      <button class="nav-btn" data-act="week-prev" aria-label="Previous week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6l-6 6 6 6"/></svg></button>
+      <div class="week-nav-mid">
+        <div class="overline">Week</div>
+        <div id="week-range">–</div>
+      </div>
+      <button class="nav-btn" data-act="week-next" aria-label="Next week" id="week-next-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6l6 6-6 6"/></svg></button>
+    </div>
+    <div id="week-content"></div>
+  </section>
+
+  <!-- ==================== WEIGHT VIEW ==================== -->
+  <section id="view-weight" aria-label="Weight log" hidden>
+    <header class="screen-head">
+      <h1>Weight</h1>
+      <p class="sub">The bold line is your 7-day average — that's the one to watch.</p>
+    </header>
+
+    <form class="card" id="wt-form">
+      <div class="form-row">
+        <div class="field">
+          <label for="wt-date">Date</label>
+          <input type="date" id="wt-date">
+        </div>
+        <div class="field">
+          <label for="wt-lbs">Weight (lbs)</label>
+          <input type="number" id="wt-lbs" min="1" step="any" inputmode="decimal" placeholder="0.0">
+        </div>
+      </div>
+      <button class="btn btn-primary btn-block" type="submit">Save weight</button>
+    </form>
+
+    <div id="wt-stats-wrap" style="margin-top:10px"></div>
+    <div id="wt-chart-wrap" style="margin-top:10px"></div>
+
+    <div class="sec-head"><h2>Entries</h2></div>
+    <div class="card" id="wt-list"></div>
+  </section>
+
+  <!-- ==================== SETTINGS VIEW ==================== -->
+  <section id="view-settings" aria-label="Settings" hidden>
+    <header class="screen-head">
+      <h1>Settings</h1>
+    </header>
+
+    <div class="sec-head"><h2>Daily targets</h2></div>
+    <form class="card" id="settings-form">
+      <div class="form-row">
+        <div class="field">
+          <label for="set-cal">Calorie ceiling</label>
+          <input type="number" id="set-cal" min="1" step="any" inputmode="numeric">
+        </div>
+        <div class="field">
+          <label for="set-pro">Protein floor (g)</label>
+          <input type="number" id="set-pro" min="1" step="any" inputmode="numeric">
+        </div>
+      </div>
+      <p class="setting-desc" style="margin-bottom:12px">Calories are a ceiling to stay under. Protein is a floor to hit or beat.</p>
+      <button class="btn btn-primary" type="submit">Save targets</button><span id="save-note" hidden>Saved ✓</span>
+    </form>
+
+    <div class="sec-head"><h2>Your data</h2></div>
+    <div class="card settings-actions">
+      <button class="btn" data-act="export">Export all data (JSON)</button>
+      <button class="btn" data-act="import">Import from JSON file…</button>
+      <input type="file" id="import-file" accept=".json,application/json" hidden>
+      <button class="btn btn-danger" data-act="clear">Clear all data…</button>
+      <div class="setting-desc" id="storage-note"></div>
+    </div>
+  </section>
+
+  <!-- The one-off quick-add form. It gets MOVED (appendChild) into whichever
+       grid's .qa-mount slot opened it — Today's or a day detail's. -->
+  <form class="card" id="qa-form" hidden>
+    <div class="field">
+      <label for="qa-name">Name</label>
+      <input type="text" id="qa-name" autocomplete="off" placeholder="e.g. Chipotle bowl">
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label for="qa-cal">Calories</label>
+        <input type="number" id="qa-cal" min="0" step="any" inputmode="decimal" placeholder="0">
+      </div>
+      <div class="field">
+        <label for="qa-pro">Protein (g)</label>
+        <input type="number" id="qa-pro" min="0" step="any" inputmode="decimal" placeholder="0">
+      </div>
+    </div>
+    <div class="field check-row">
+      <input type="checkbox" id="qa-save">
+      <label for="qa-save">Also save to my meal library</label>
+    </div>
+    <div class="field" id="qa-tag-wrap" hidden>
+      <label for="qa-tag">Meal slot (optional)</label>
+      <select id="qa-tag">
+        <option value="">None</option>
+        <option value="breakfast">Breakfast</option>
+        <option value="lunch">Lunch</option>
+        <option value="dinner">Dinner</option>
+        <option value="snack">Snack</option>
+      </select>
+    </div>
+    <button class="btn btn-primary btn-block" type="submit">Add to this day</button>
+  </form>
+
+</main>
+
+<nav id="tabbar" aria-label="Main navigation">
+  <button data-act="tab" data-view="today" aria-current="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.2V20h13v-9.8"/></svg>
+    Today
+  </button>
+  <button data-act="tab" data-view="library" aria-current="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.6"/></svg>
+    Meals
+  </button>
+  <button data-act="tab" data-view="week" aria-current="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8.5 3v4M15.5 3v4"/></svg>
+    Week
+  </button>
+  <button data-act="tab" data-view="weight" aria-current="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16.5" rx="3.5"/><path d="M8.2 10.6a3.9 3.9 0 0 1 7.6 0"/><path d="M12 10.6l1.8-1.9"/></svg>
+    Weight
+  </button>
+  <button data-act="tab" data-view="settings" aria-current="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.2h16M4 12h16M4 16.8h16"/><circle cx="9.2" cy="7.2" r="2" fill="var(--bg)"/><circle cx="15" cy="12" r="2" fill="var(--bg)"/><circle cx="7.5" cy="16.8" r="2" fill="var(--bg)"/></svg>
+    Settings
+  </button>
+</nav>
+
+<script>
+'use strict';
+/* ============================================================
+   1. CONSTANTS & SMALL HELPERS
+   ============================================================ */
+const STORAGE_KEY = 'calorieTracker.v1';
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DOW    = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const TAGS   = ['breakfast','lunch','dinner','snack'];
+const TAG_LABEL = { breakfast:'Breakfast', lunch:'Lunch', dinner:'Dinner', snack:'Snack' };
+
+const $ = id => document.getElementById(id);
+
+// Reusable inline SVG icons
+const I = {
+  edit:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4.5-.9L20 7.6 16.4 4 4.9 15.5 4 20z"/><path d="M13.5 6.9l3.6 3.6"/></svg>',
+  del:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13.5h9l1-13.5"/></svg>',
+  plus:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  dots:  '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5.5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18.5" r="1.8"/></svg>',
+  chev:  '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6l6 6-6 6"/></svg>',
+};
+
+// Thousands-separated integer display
+const fmt = n => Math.round(n).toLocaleString('en-US');
+// Grams: show one decimal only when needed
+const fmtG = n => (Math.round(n * 10) / 10).toLocaleString('en-US');
+// Weight: one decimal
+const fmtLbs = n => (Math.round(n * 10) / 10).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+// HTML-escape anything user-entered before it goes into innerHTML
+const esc = s => String(s).replace(/[&<>"']/g, c =>
+  ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+
+// Parse a numeric input. Returns null for non-numbers or values < min.
+function toNum(v, min = 0) {
+  if (v === '' || v == null) return null;
+  const n = parseFloat(v);
+  return (Number.isFinite(n) && n >= min) ? n : null;
+}
+
+/* ---- Local-timezone date keys. NEVER toISOString() for day keys:
+        it converts to UTC and files late-night meals under the wrong day. ---- */
+const pad2 = n => String(n).padStart(2, '0');
+function dateKey(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+function todayKey() { return dateKey(new Date()); }
+function parseKey(key) { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d); }
+function shiftKey(key, days) { const d = parseKey(key); d.setDate(d.getDate() + days); return dateKey(d); }
+function mondayOf(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); // getDay(): Sun=0 → Monday-start offset
+  return x;
+}
+function fmtShort(key) { const d = parseKey(key); return MONTHS[d.getMonth()] + ' ' + d.getDate(); }
+function fmtLong(key)  { const d = parseKey(key); return DOW[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear(); }
+function fmtTime(iso, dayK) {
+  // Show a time only when the entry was logged on the day it belongs to
+  const d = new Date(iso);
+  if (isNaN(d) || dateKey(d) !== dayK) return '';
+  let h = d.getHours(); const m = pad2(d.getMinutes()); const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return h + ':' + m + ' ' + ap;
+}
+
+/* ============================================================
+   2. STATE & STORAGE
+   ============================================================ */
+function defaultState() {
+  return {
+    version: 2,
+    settings: { calorieTarget: 2300, proteinTarget: 200 },
+    library: [],   // starts empty — you build your own
+    days: {},      // "YYYY-MM-DD" -> { entries: [...] }
+    weights: [],   // [{ date, lbs }]
+  };
+}
+
+// v1 shipped these pre-loaded; v2 removes any that were never touched.
+const V1_SEEDS = new Set([
+  'Quest bar|190|21', 'Homemade chicken (8 oz)|330|60', 'Tyson diced grilled chicken (8 oz)|347|53',
+  'Pork chop (4 oz)|180|24', 'Protein shake|150|25', 'Fairlife milk (1 cup)|80|13', 'Fried egg|90|6',
+  'Open-faced burger (bottom bun)|320|27', 'Green beans (1 cup)|40|2', 'Mashed potatoes (1 cup)|210|4',
+  'Sweet potato (medium)|105|2',
+]);
+
+/* Migration hook: bring any older/partial stored object up to the current
+   shape without dropping data. Add new "if (d.version === N)" blocks here
+   when the schema changes. */
+function migrate(raw) {
+  const d = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  if (!Number.isFinite(d.version)) d.version = 1;
+  d.settings = Object.assign({ calorieTarget: 2300, proteinTarget: 200 }, d.settings);
+  if (!(toNum(d.settings.calorieTarget, 1))) d.settings.calorieTarget = 2300;
+  if (!(toNum(d.settings.proteinTarget, 1))) d.settings.proteinTarget = 200;
+  d.library = Array.isArray(d.library) ? d.library.filter(m => m && m.name != null) : [];
+  d.library.forEach(m => {
+    m.id = m.id || uid();
+    m.calories = toNum(m.calories) ?? 0;
+    m.protein  = toNum(m.protein)  ?? 0;
+    m.note = m.note || ''; m.tag = m.tag || '';
+    m.useCount = toNum(m.useCount) ?? 0;
+  });
+  d.days = (d.days && typeof d.days === 'object') ? d.days : {};
+  for (const key of Object.keys(d.days)) {
+    const day = d.days[key];
+    if (!day || !Array.isArray(day.entries)) { delete d.days[key]; continue; }
+    day.entries = day.entries.filter(e => e && e.name != null);
+    day.entries.forEach(e => {
+      e.id = e.id || uid();
+      e.calories = toNum(e.calories) ?? 0;
+      e.protein  = toNum(e.protein)  ?? 0;
+      e.qty = toNum(e.qty) || 1;
+    });
+    if (day.entries.length === 0) delete d.days[key];
+  }
+  d.weights = Array.isArray(d.weights) ? d.weights.filter(w => w && /^\d{4}-\d{2}-\d{2}$/.test(w.date) && toNum(w.lbs, 0.1) != null) : [];
+  d.weights.sort((a, b) => a.date < b.date ? -1 : 1);
+
+  if (d.version === 1) {
+    // Drop v1's pre-loaded meals if they were never used or customized
+    d.library = d.library.filter(m =>
+      !(m.useCount === 0 && !m.note && !m.tag && V1_SEEDS.has(m.name + '|' + m.calories + '|' + m.protein)));
+    d.version = 2;
+  }
+  return d;
+}
+
+let storageOk = true;
+let state;
+
+function loadState() {
+  let raw = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch (err) {
+    storageOk = false;
+  }
+  if (raw == null) { state = defaultState(); if (storageOk) save(); return; }
+  try {
+    state = migrate(JSON.parse(raw));
+    save(); // persist any migration
+  } catch (err) {
+    // Corrupt JSON: start fresh but keep the bad blob under a recovery key.
+    try { localStorage.setItem(STORAGE_KEY + '.corrupt', raw); } catch (e) { /* ignore */ }
+    state = defaultState();
+  }
+}
+
+function save() {
+  if (!storageOk) return; // in-memory only; banner is already showing
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (err) {
+    storageOk = false;
+    renderBanner();
+  }
+}
+
+/* ============================================================
+   3. DATA OPERATIONS
+   ============================================================ */
+function dayEntries(key) { return (state.days[key] && state.days[key].entries) || []; }
+
+function dayTotals(key) {
+  let cal = 0, pro = 0;
+  for (const e of dayEntries(key)) { cal += e.calories * e.qty; pro += e.protein * e.qty; }
+  return { cal, pro };
+}
+
+function addEntry(key, { name, calories, protein, qty = 1, mealId = null }) {
+  if (!state.days[key]) state.days[key] = { entries: [] };
+  state.days[key].entries.push({
+    id: uid(), name, calories, protein, qty,
+    mealId, loggedAt: new Date().toISOString(),
+  });
+  save();
+}
+
+function deleteEntry(key, entryId) {
+  const day = state.days[key];
+  if (!day) return;
+  day.entries = day.entries.filter(e => e.id !== entryId);
+  if (day.entries.length === 0) delete state.days[key]; // keep `days` sparse
+  save();
+}
+
+/* Which day does a log action apply to? The day detail's day when that view
+   is open; otherwise today. */
+function activeDayKey() { return $('view-day').hidden ? todayKey() : viewDate; }
+
+function logMeal(mealId, qty) {
+  const meal = state.library.find(m => m.id === mealId);
+  if (!meal) return;
+  addEntry(activeDayKey(), { name: meal.name, calories: meal.calories, protein: meal.protein, qty, mealId });
+  meal.useCount += 1;
+  save();
+  if (navigator.vibrate) navigator.vibrate(10); // tap feedback on Android; iOS ignores
+  renderAfterLogChange();
+}
+
+// Everything that can change when an entry is added/edited/deleted
+function renderAfterLogChange() {
+  renderToday(); renderDayList(); renderDayDetail();
+  renderQuicklog(); renderLibrary(); renderWeek();
+}
+
+function sortedLibrary() {
+  return [...state.library].sort((a, b) => b.useCount - a.useCount || a.name.localeCompare(b.name));
+}
+function anyTags() { return state.library.some(m => m.tag); }
+
+function upsertWeight(date, lbs) {
+  const existing = state.weights.find(w => w.date === date);
+  if (existing) existing.lbs = lbs;
+  else state.weights.push({ date, lbs });
+  state.weights.sort((a, b) => a.date < b.date ? -1 : 1);
+  save();
+}
+
+/* ============================================================
+   4. RENDERING
+   ============================================================ */
+let currentView = 'today';
+let viewDate = todayKey();     // the day the DAY DETAIL view is showing
+let lastKnownToday = todayKey();
+let weekOffset = 0;            // 0 = current week, -1 = last week, ...
+let activeTag = 'all';         // library filter, shared across screens
+let openQtyMealId = null;      // which meal card has its quantity row open
+let editingEntryId = null;
+let editingMealId = null;
+let detailAddOpen = false;     // "Add food" section expanded in day detail
+
+function renderAll() {
+  renderBanner(); renderToday(); renderDayList(); renderDayDetail();
+  renderQuicklog(); renderChips(); renderLibrary(); renderWeek();
+  renderWeight(); renderSettings();
+}
+
+function renderBanner() {
+  $('storage-banner').hidden = storageOk;
+  $('storage-note').textContent = storageOk
+    ? 'Data is stored in this browser’s localStorage. Export a backup occasionally.'
+    : 'Storage is unavailable (private browsing?). Everything works for this session only.';
+}
+
+/* 'day' is a drill-in screen, not a tab; the Today tab stays highlighted. */
+function switchView(view) {
+  currentView = view;
+  for (const v of ['today', 'day', 'library', 'week', 'weight', 'settings'])
+    $('view-' + v).hidden = (v !== view);
+  const tabFor = view === 'day' ? 'today' : view;
+  document.querySelectorAll('#tabbar button').forEach(b =>
+    b.setAttribute('aria-current', String(b.dataset.view === tabFor)));
+  window.scrollTo(0, 0);
+}
+
+/* ---------------- Shared: the two target bars for any day ---------------- */
+function barsHtml(key) {
+  const { cal, pro } = dayTotals(key);
+  const calT = state.settings.calorieTarget, proT = state.settings.proteinTarget;
+
+  /* Calorie bar: a CEILING. Green under, amber in the last ~10%, red over. */
+  const calPct = Math.min(cal / calT, 1) * 100;
+  let calFill, calStatus, calClass;
+  if (cal > calT)             { calFill = 'fill-red';   calClass = 'st-red';   calStatus = fmt(cal - calT) + ' over the ceiling'; }
+  else if (cal >= calT * 0.9) { calFill = 'fill-amber'; calClass = 'st-amber'; calStatus = fmt(calT - cal) + ' left — close to the ceiling'; }
+  else                        { calFill = 'fill-green'; calClass = 'st-green'; calStatus = fmt(calT - cal) + ' remaining'; }
+
+  /* Protein bar: a FLOOR. Grey while short, green at/over, and it visually
+     overflows past the target tick instead of capping at 100%. */
+  const proPct = proT > 0 ? pro / proT : 0;
+  const hit = proPct >= 1;
+  const scale = Math.max(1, Math.min(proPct, 1.6)); // bar spans up to 160% of target
+  const fillW = Math.min(proPct, 1.6) / scale * 100;
+  const tickAt = 100 / scale;
+  let proHtml;
+  if (hit) {
+    proHtml =
+      '<div class="bar-track overflowing" role="progressbar" aria-label="Protein" aria-valuemin="0" aria-valuemax="' + proT + '" aria-valuenow="' + Math.round(pro) + '">' +
+        '<div class="bar-fill fill-green" style="width:' + tickAt + '%"></div>' +
+        '<div class="bar-overflow" style="left:' + tickAt + '%;width:' + Math.max(fillW - tickAt, 0) + '%"></div>' +
+        '<div class="bar-tick" style="left:' + tickAt + '%"></div>' +
+      '</div>' +
+      '<div class="bar-foot"><span class="bar-status st-green">Floor hit ✓' + (pro > proT ? ' — ' + fmtG(pro - proT) + 'g past it' : '') + '</span>' +
+      '<span class="bar-pct">' + Math.round(proPct * 100) + '%</span></div>';
+  } else {
+    proHtml =
+      '<div class="bar-track" role="progressbar" aria-label="Protein" aria-valuemin="0" aria-valuemax="' + proT + '" aria-valuenow="' + Math.round(pro) + '">' +
+        '<div class="bar-fill fill-faint" style="width:' + (proPct * 100) + '%"></div>' +
+      '</div>' +
+      '<div class="bar-foot"><span class="bar-status st-mut">' + fmtG(proT - pro) + 'g to go</span>' +
+      '<span class="bar-pct">' + Math.round(proPct * 100) + '%</span></div>';
+  }
+
+  return (
+    '<div class="bar-block">' +
+      '<div class="bar-head"><span class="bar-title">Calories</span>' +
+      '<span class="bar-nums">' + fmt(cal) + ' <span class="of">/ ' + fmt(calT) + '</span></span></div>' +
+      '<div class="bar-track" role="progressbar" aria-label="Calories" aria-valuemin="0" aria-valuemax="' + calT + '" aria-valuenow="' + Math.round(cal) + '">' +
+        '<div class="bar-fill ' + calFill + '" style="width:' + calPct + '%"></div>' +
+      '</div>' +
+      '<div class="bar-foot"><span class="bar-status ' + calClass + '">' + calStatus + '</span>' +
+      '<span class="bar-pct">' + Math.round(cal / calT * 100) + '%</span></div>' +
+    '</div>' +
+    '<div class="bar-block">' +
+      '<div class="bar-head"><span class="bar-title">Protein</span>' +
+      '<span class="bar-nums">' + fmtG(pro) + ' <span class="of">/ ' + fmtG(proT) + 'g</span></span></div>' +
+      proHtml +
+    '</div>');
+}
+
+/* ---------------- Today (always the current day) ---------------- */
+function renderToday() {
+  const key = todayKey(), d = parseKey(key);
+  $('today-title').textContent = MONTHS[d.getMonth()] + ' ' + d.getDate();
+  $('today-sub').textContent = fmtLong(key);
+  $('bars').innerHTML = barsHtml(key);
+}
+
+/* ---------------- The logger: one row per day ---------------- */
+function renderDayList() {
+  const tKey = todayKey();
+  const keys = Object.keys(state.days).filter(k => dayEntries(k).length > 0);
+  if (!keys.includes(tKey)) keys.push(tKey); // today always shows, even empty
+  keys.sort().reverse();
+
+  const loggedDays = keys.filter(k => dayEntries(k).length > 0).length;
+  $('daylist-count').textContent = loggedDays ? loggedDays + (loggedDays === 1 ? ' day logged' : ' days logged') : '';
+
+  const calT = state.settings.calorieTarget, proT = state.settings.proteinTarget;
+  let html = '';
+  for (const k of keys) {
+    const entries = dayEntries(k);
+    const t = dayTotals(k);
+    const d = parseKey(k);
+    const label = k === tKey ? 'Today' : (k === shiftKey(tKey, -1) ? 'Yesterday' : DOW[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate());
+    const sub = entries.length === 0 ? 'nothing logged yet'
+      : entries.length + (entries.length === 1 ? ' meal' : ' meals') +
+        (d.getFullYear() !== new Date().getFullYear() ? ' · ' + d.getFullYear() : '');
+    html +=
+      '<button class="day-row" data-act="open-day" data-key="' + k + '">' +
+        '<span class="d-date">' + label + '<small>' + sub + '</small></span>' +
+        (entries.length
+          ? '<span class="d-nums"><b>' + fmt(t.cal) + '</b> cal<br>' + fmtG(t.pro) + 'g protein</span>' +
+            '<span class="dots">' +
+              '<span class="dot ' + (t.cal <= calT ? 'dot-green' : 'dot-red') + '" title="Calories ' + (t.cal <= calT ? 'under' : 'over') + ' target" aria-label="Calories ' + (t.cal <= calT ? 'under' : 'over') + ' target"></span>' +
+              '<span class="dot ' + (t.pro >= proT ? 'dot-green' : 'dot-grey') + '" title="Protein floor ' + (t.pro >= proT ? 'hit' : 'missed') + '" aria-label="Protein floor ' + (t.pro >= proT ? 'hit' : 'missed') + '"></span>' +
+            '</span>'
+          : '<span class="d-nums mut">–</span>') +
+        I.chev +
+      '</button>';
+  }
+  $('day-list').innerHTML = html;
+}
+
+/* ---------------- Day detail (drill-in: one day's meals) ---------------- */
+function renderDayDetail() {
+  const key = viewDate, isToday = key === todayKey();
+  const d = parseKey(key);
+  $('dd-overline').textContent = isToday ? 'Today' : DOW_FULL[d.getDay()];
+  $('dd-title').textContent = MONTHS[d.getMonth()] + ' ' + d.getDate();
+  $('dd-sub').textContent = fmtLong(key);
+  $('day-next-btn').disabled = key >= todayKey();
+  $('detail-bars').innerHTML = barsHtml(key);
+  $('detail-add').hidden = !detailAddOpen;
+  $('detail-add-toggle').setAttribute('aria-expanded', String(detailAddOpen));
+  renderEntries();
+}
+
+function renderEntries() {
+  const entries = dayEntries(viewDate);
+  const t = dayTotals(viewDate);
+  $('log-count').textContent = entries.length
+    ? entries.length + (entries.length === 1 ? ' meal · ' : ' meals · ') + fmt(t.cal) + ' cal · ' + fmtG(t.pro) + 'g'
+    : '';
+  if (entries.length === 0) {
+    $('entry-list').innerHTML = '<div class="empty-note">Nothing logged on this day.<br>Use “Add food” below to log to it.</div>';
+    return;
+  }
+  let html = '';
+  for (const e of entries) {
+    if (e.id === editingEntryId) {
+      html +=
+        '<div class="entry-edit" data-id="' + e.id + '">' +
+          '<input class="ee-name" type="text" value="' + esc(e.name) + '" aria-label="Name">' +
+          '<input class="ee-cal" type="number" min="0" step="any" inputmode="decimal" value="' + e.calories + '" aria-label="Calories per 1x">' +
+          '<input class="ee-pro" type="number" min="0" step="any" inputmode="decimal" value="' + e.protein + '" aria-label="Protein grams per 1x">' +
+          '<input class="ee-qty" type="number" min="0.1" step="0.25" inputmode="decimal" value="' + e.qty + '" aria-label="Quantity">' +
+          '<button class="btn btn-sm btn-primary" type="button" data-act="entry-save">Save</button>' +
+          '<button class="btn btn-sm" type="button" data-act="entry-cancel">Cancel</button>' +
+        '</div>';
+    } else {
+      const time = fmtTime(e.loggedAt, viewDate);
+      html +=
+        '<div class="entry-row">' +
+          '<div class="entry-main">' +
+            '<div class="entry-name">' + esc(e.name) +
+              (e.qty !== 1 ? ' <span class="entry-qty">×' + e.qty + '</span>' : '') + '</div>' +
+            (time ? '<div class="entry-time">' + time + '</div>' : '') +
+          '</div>' +
+          '<span class="entry-cal num">' + fmt(e.calories * e.qty) + '<small> cal</small></span>' +
+          '<span class="entry-pro num">' + fmtG(e.protein * e.qty) + '<small>g</small></span>' +
+          '<button class="icon-btn" data-act="entry-edit" data-id="' + e.id + '" aria-label="Edit ' + esc(e.name) + '">' + I.edit + '</button>' +
+          '<button class="icon-btn" data-act="entry-del" data-id="' + e.id + '" aria-label="Delete ' + esc(e.name) + '">' + I.del + '</button>' +
+        '</div>';
+    }
+  }
+  $('entry-list').innerHTML = html;
+}
+
+/* ---------------- Quick-log grids + filter chips ---------------- */
+function renderChips() {
+  const show = anyTags();
+  for (const el of [$('chips-today'), $('chips-lib'), $('chips-detail')]) {
+    el.hidden = !show;
+    if (!show) { el.innerHTML = ''; continue; }
+    let html = '<button class="chip" data-act="filter" data-tag="all" aria-pressed="' + (activeTag === 'all') + '">All</button>';
+    for (const t of TAGS)
+      html += '<button class="chip" data-act="filter" data-tag="' + t + '" aria-pressed="' + (activeTag === t) + '">' + TAG_LABEL[t] + '</button>';
+    el.innerHTML = html;
+  }
+  if (!show) activeTag = 'all';
+}
+
+function filteredLibrary() {
+  const lib = sortedLibrary();
+  return activeTag === 'all' ? lib : lib.filter(m => m.tag === activeTag);
+}
+
+function quicklogHtml() {
+  const lib = filteredLibrary();
+  let html = '';
+  if (state.library.length === 0) {
+    html +=
+      '<div class="quicklog-empty card">' +
+        '<p>No saved meals yet.<br>Save the things you eat on repeat, then log them from here with one tap.</p>' +
+        '<button class="btn btn-primary" data-act="goto-meals">' + I.plus + ' Create your first meal</button>' +
+      '</div>';
+  } else if (lib.length === 0) {
+    html += '<div class="empty-note" style="grid-column:1/-1">No meals tagged “' + esc(TAG_LABEL[activeTag] || activeTag) + '”.</div>';
+  } else {
+    for (const m of lib) {
+      html +=
+        '<div class="meal-card">' +
+          '<button class="meal-log" data-act="log" data-id="' + m.id + '">' +
+            '<span class="meal-name">' + esc(m.name) + '</span>' +
+            '<span class="meal-macros">' + fmt(m.calories) + ' cal · <b>' + fmtG(m.protein) + 'g</b></span>' +
+          '</button>' +
+          '<button class="meal-more" data-act="qty-toggle" data-id="' + m.id + '" aria-expanded="' + (openQtyMealId === m.id) + '" aria-label="Log a different quantity of ' + esc(m.name) + '">' + I.dots + '</button>' +
+        '</div>';
+      if (openQtyMealId === m.id) {
+        html += '<div class="qty-row"><span class="mut">Log:</span>';
+        for (const q of [0.5, 1.5, 2, 3])
+          html += '<button class="btn btn-sm" data-act="logqty" data-id="' + m.id + '" data-qty="' + q + '">' + (q === 0.5 ? '½' : q) + '×</button>';
+        html += '</div>';
+      }
+    }
+  }
+  // One-off tile + a mount slot the shared quick-add form moves into
+  html += '<button class="add-tile" data-act="qa-toggle">' + I.plus + ' One-off</button>';
+  html += '<div class="qa-mount"></div>';
+  return html;
+}
+
+/* Render into both grids (Today's and the day detail's). The single #qa-form
+   node is re-mounted afterwards so an open form isn't lost on re-render. */
+function renderQuicklog() {
+  const form = $('qa-form');
+  const wasOpenIn = !form.hidden ? form.closest('section')?.id : null;
+  const html = quicklogHtml();
+  $('quicklog-grid').innerHTML = html;
+  $('detail-quicklog').innerHTML = html;
+  if (wasOpenIn === 'view-today') $('quicklog-grid').querySelector('.qa-mount').appendChild(form);
+  else if (wasOpenIn === 'view-day') $('detail-quicklog').querySelector('.qa-mount').appendChild(form);
+  else document.querySelector('main').appendChild(form); // parked, hidden
+}
+
+/* ---------------- Library management ---------------- */
+function renderLibrary() {
+  const lib = filteredLibrary();
+  if (state.library.length === 0) {
+    $('lib-list').innerHTML = '<div class="empty-note">Nothing here yet.<br>Hit <b>New meal</b> above — name, calories, protein, done.</div>';
+    return;
+  }
+  if (lib.length === 0) {
+    $('lib-list').innerHTML = '<div class="empty-note">No meals tagged “' + esc(TAG_LABEL[activeTag] || activeTag) + '”.</div>';
+    return;
+  }
+  let html = '';
+  for (const m of lib) {
+    if (m.id === editingMealId) {
+      html +=
+        '<div class="lib-edit-form" data-id="' + m.id + '">' +
+          '<div class="field"><label>Name</label><input class="le-name" type="text" value="' + esc(m.name) + '"></div>' +
+          '<div class="form-row">' +
+            '<div class="field"><label>Calories</label><input class="le-cal" type="number" min="0" step="any" inputmode="decimal" value="' + m.calories + '"></div>' +
+            '<div class="field"><label>Protein (g)</label><input class="le-pro" type="number" min="0" step="any" inputmode="decimal" value="' + m.protein + '"></div>' +
+          '</div>' +
+          '<div class="field"><label>Note</label><input class="le-note" type="text" value="' + esc(m.note) + '"></div>' +
+          '<div class="field"><label>Meal slot</label><select class="le-tag">' +
+            '<option value="">None</option>' +
+            TAGS.map(t => '<option value="' + t + '"' + (m.tag === t ? ' selected' : '') + '>' + TAG_LABEL[t] + '</option>').join('') +
+          '</select></div>' +
+          '<button class="btn btn-sm btn-primary" type="button" data-act="meal-save">Save</button> ' +
+          '<button class="btn btn-sm" type="button" data-act="meal-cancel">Cancel</button>' +
+        '</div>';
+    } else {
+      html +=
+        '<div class="lib-row">' +
+          '<div class="lib-info">' +
+            '<div class="lib-name">' + esc(m.name) + '</div>' +
+            (m.note ? '<div class="lib-note">' + esc(m.note) + '</div>' : '') +
+            '<div class="lib-meta">' + (m.tag ? '<span class="tag-pill">' + TAG_LABEL[m.tag] + '</span>' : '') + 'logged ' + m.useCount + '×</div>' +
+          '</div>' +
+          '<div class="lib-macros">' + fmt(m.calories) + ' cal<br><span class="mut">' + fmtG(m.protein) + 'g protein</span></div>' +
+          '<button class="icon-btn" data-act="meal-edit" data-id="' + m.id + '" aria-label="Edit ' + esc(m.name) + '">' + I.edit + '</button>' +
+          '<button class="icon-btn" data-act="meal-del" data-id="' + m.id + '" aria-label="Delete ' + esc(m.name) + '">' + I.del + '</button>' +
+        '</div>';
+    }
+  }
+  $('lib-list').innerHTML = html;
+}
+
+/* ---------------- Week view ---------------- */
+function weekKeys(offset) {
+  const mon = mondayOf(new Date());
+  mon.setDate(mon.getDate() + offset * 7);
+  return Array.from({ length: 7 }, (_, i) => { const d = new Date(mon); d.setDate(mon.getDate() + i); return dateKey(d); });
+}
+
+function renderWeek() {
+  const keys = weekKeys(weekOffset);
+  const calT = state.settings.calorieTarget, proT = state.settings.proteinTarget;
+  const tKey = todayKey();
+  $('week-next-btn').disabled = weekOffset >= 0;
+  const endShort = fmtShort(keys[6]) + (parseKey(keys[0]).getFullYear() !== new Date().getFullYear() ? ', ' + parseKey(keys[6]).getFullYear() : '');
+  $('week-range').textContent = fmtShort(keys[0]) + ' – ' + endShort;
+
+  const days = keys.map(k => {
+    const t = dayTotals(k);
+    return { key: k, cal: t.cal, pro: t.pro, logged: dayEntries(k).length > 0, future: k > tKey };
+  });
+  const logged = days.filter(d => d.logged);
+  const totCal = days.reduce((s, d) => s + d.cal, 0);
+  const totPro = days.reduce((s, d) => s + d.pro, 0);
+
+  // Weekly budget — the headline number
+  const budget = calT * 7;
+  const remaining = budget - totCal;
+  const usedPct = Math.min(totCal / budget, 1) * 100;
+  let html =
+    '<div class="card hero">' +
+      '<div class="bar-title" style="margin-bottom:10px">Weekly budget</div>' +
+      '<div class="budget-big ' + (remaining >= 0 ? '' : 'st-red') + '">' +
+        (remaining >= 0 ? fmt(remaining) + ' <span class="of">left of ' + fmt(budget) + '</span>'
+                        : fmt(-remaining) + ' <span class="of">over ' + fmt(budget) + '</span>') +
+      '</div>' +
+      '<div class="budget-track"><div class="bar-fill ' + (totCal > budget ? 'fill-red' : 'fill-green') + '" style="width:' + usedPct + '%"></div></div>' +
+      '<div class="budget-row"><span>' + fmt(totCal) + ' consumed</span><span>' + Math.round(totCal / budget * 100) + '% used</span></div>' +
+    '</div>';
+
+  // Bar chart
+  html += '<div class="card" style="margin-top:10px"><div class="chart-title">Daily calories</div>' + buildWeekChart(days, calT) + '</div>';
+
+  // Table
+  html += '<div class="card" style="margin-top:10px"><table class="week-table"><thead><tr><th scope="col">Day</th><th scope="col">Calories</th><th scope="col">Protein</th></tr></thead><tbody>';
+  for (const d of days) {
+    const dd = parseKey(d.key);
+    html += '<tr' + (d.key === tKey ? ' class="is-today"' : '') + '>' +
+      '<td>' + DOW[dd.getDay()] + ' ' + (dd.getMonth() + 1) + '/' + dd.getDate() + '</td>' +
+      (d.logged
+        ? '<td class="num' + (d.cal > calT ? ' over' : '') + '">' + fmt(d.cal) + '</td>' +
+          '<td class="num' + (d.pro >= proT ? ' hit' : '') + '">' + fmtG(d.pro) + 'g</td>'
+        : '<td class="mut">–</td><td class="mut">–</td>') +
+      '</tr>';
+  }
+  html += '<tr class="sum-row"><td>Total</td><td class="num">' + fmt(totCal) + '</td><td class="num">' + fmtG(totPro) + 'g</td></tr>';
+  html += '<tr class="avg-row"><td>Average' + (logged.length ? ' (' + logged.length + 'd)' : '') + '</td>' +
+    (logged.length
+      ? '<td class="num">' + fmt(totCal / logged.length) + '</td><td class="num">' + fmtG(totPro / logged.length) + 'g</td>'
+      : '<td>–</td><td>–</td>') + '</tr>';
+  html += '</tbody></table></div>';
+
+  // Weekday vs weekend — weekends are the known weak spot, keep them visible
+  const wd = logged.filter(d => { const g = parseKey(d.key).getDay(); return g >= 1 && g <= 5; });
+  const we = logged.filter(d => { const g = parseKey(d.key).getDay(); return g === 0 || g === 6; });
+  const cell = (label, arr) => {
+    if (arr.length === 0) return '<div class="split-cell"><div class="lbl">' + label + '</div><div class="val mut" style="font-size:16px;font-weight:600">no data</div></div>';
+    const c = arr.reduce((s, d) => s + d.cal, 0) / arr.length, p = arr.reduce((s, d) => s + d.pro, 0) / arr.length;
+    return '<div class="split-cell"><div class="lbl">' + label + ' · ' + arr.length + 'd</div>' +
+      '<div class="val' + (c > calT ? ' st-red' : '') + '">' + fmt(c) + '<span style="font-size:13px;font-weight:550;color:var(--muted)"> cal/day</span></div>' +
+      '<div class="sub">' + fmtG(p) + 'g protein avg</div></div>';
+  };
+  html += '<div class="split-grid">' + cell('Weekdays', wd) + cell('Weekend', we) + '</div>';
+
+  $('week-content').innerHTML = html;
+}
+
+/* Inline-SVG bar chart of the week's calories with the target line. */
+function buildWeekChart(days, target) {
+  const W = 700, H = 230, L = 52, R = 92, T = 18, B = 30;
+  const plotW = W - L - R, plotH = H - T - B;
+  const maxV = Math.max(target * 1.15, ...days.map(d => d.cal)) || 1;
+  const y = v => T + (1 - v / maxV) * plotH;
+  const slot = plotW / 7, bw = Math.min(slot * 0.62, 56);
+  // Rounded-top bar anchored to the baseline
+  const barPath = (x, yTop, w, h) => {
+    const r = Math.min(4, w / 2, h);
+    return 'M' + x + ',' + (yTop + h) + ' L' + x + ',' + (yTop + r) +
+      ' Q' + x + ',' + yTop + ' ' + (x + r) + ',' + yTop +
+      ' L' + (x + w - r) + ',' + yTop +
+      ' Q' + (x + w) + ',' + yTop + ' ' + (x + w) + ',' + (yTop + r) +
+      ' L' + (x + w) + ',' + (yTop + h) + ' Z';
+  };
+  const step = [250, 500, 1000, 2000].find(s => maxV / s <= 5) || 4000;
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Bar chart of daily calories this week" style="width:100%;height:auto">';
+  for (let v = step; v <= maxV; v += step) {
+    svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="rgba(255,255,255,.07)" stroke-width="1"/>';
+    svg += '<text x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end" font-size="12" fill="var(--muted)">' + fmt(v) + '</text>';
+  }
+  svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(0) + '" y2="' + y(0) + '" stroke="rgba(255,255,255,.12)" stroke-width="1"/>';
+  const tKey = todayKey();
+  days.forEach((d, i) => {
+    const cx = L + i * slot + slot / 2;
+    const dd = parseKey(d.key);
+    if (d.logged && d.cal > 0) {
+      const yT = y(d.cal);
+      svg += '<path d="' + barPath(cx - bw / 2, yT, bw, y(0) - yT) + '" fill="' + (d.cal > target ? 'var(--red)' : 'var(--accent)') + '">' +
+        '<title>' + DOW[dd.getDay()] + ' ' + fmtShort(d.key) + ' — ' + fmt(d.cal) + ' cal</title></path>';
+    }
+    svg += '<text x="' + cx + '" y="' + (H - 10) + '" text-anchor="middle" font-size="13" fill="' + (d.key === tKey ? 'var(--accent)' : 'var(--muted)') + '"' + (d.key === tKey ? ' font-weight="700"' : '') + '>' + DOW[dd.getDay()] + '</text>';
+  });
+  // Target line above the bars, labeled in the right margin (out of the bars' way)
+  svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(target) + '" y2="' + y(target) + '" stroke="var(--text)" stroke-width="1.5" stroke-dasharray="5 5" opacity="0.7"/>';
+  svg += '<text x="' + (W - R + 8) + '" y="' + (y(target) + 4) + '" font-size="12" fill="var(--text)" opacity="0.85">target ' + fmt(target) + '</text>';
+  // Value labels last, with a background halo so the target line never strikes through them
+  days.forEach((d, i) => {
+    if (!(d.logged && d.cal > 0)) return;
+    const cx = L + i * slot + slot / 2;
+    svg += '<text x="' + cx + '" y="' + (y(d.cal) - 6) + '" text-anchor="middle" font-size="12" fill="var(--muted)" stroke="#131822" stroke-width="3" paint-order="stroke">' + fmt(d.cal) + '</text>';
+  });
+  svg += '</svg>';
+  if (!days.some(d => d.logged)) svg += '<div class="empty-note">Nothing logged this week yet.</div>';
+  return svg;
+}
+
+/* ---------------- Weight view ---------------- */
+// 7-day trailing average at each point's date (averages whatever readings exist in the window)
+function weightSeries() {
+  const pts = state.weights.map(w => ({ date: w.date, t: parseKey(w.date).getTime(), lbs: w.lbs }));
+  const DAY = 86400000;
+  for (const p of pts) {
+    const win = pts.filter(q => q.t >= p.t - 6 * DAY && q.t <= p.t);
+    p.avg = win.reduce((s, q) => s + q.lbs, 0) / win.length;
+  }
+  return pts;
+}
+
+function renderWeight() {
+  if (!$('wt-date').value) $('wt-date').value = todayKey();
+  const pts = weightSeries();
+
+  if (pts.length === 0) {
+    $('wt-stats-wrap').innerHTML = '';
+    $('wt-chart-wrap').innerHTML = '';
+    $('wt-list').innerHTML = '<div class="empty-note">No weights yet.<br>Log the first one above and the trend chart appears.</div>';
+    return;
+  }
+
+  // Change over last 7 / 30 days, measured on the trend line (rolling avg),
+  // not raw points — raw daily weight is noise.
+  const last = pts[pts.length - 1];
+  const DAY = 86400000;
+  const avgAtOrBefore = t => { const c = pts.filter(p => p.t <= t); return c.length ? c[c.length - 1].avg : null; };
+  const change = days => {
+    const base = avgAtOrBefore(last.t - days * DAY);
+    return base == null ? null : last.avg - base;
+  };
+  const chip = (label, v) => {
+    if (v == null) return '<div class="wt-stat"><div class="lbl">' + label + '</div><div class="val mut">–</div></div>';
+    const s = (v > 0 ? '+' : '') + fmtLbs(v);
+    return '<div class="wt-stat"><div class="lbl">' + label + '</div><div class="val">' + s + '</div></div>';
+  };
+  $('wt-stats-wrap').innerHTML =
+    '<div class="wt-stats">' +
+      '<div class="wt-stat"><div class="lbl">7-day avg</div><div class="val main">' + fmtLbs(last.avg) + '</div></div>' +
+      chip('7-day change', change(7)) +
+      chip('30-day change', change(30)) +
+    '</div>';
+
+  $('wt-chart-wrap').innerHTML = pts.length >= 2
+    ? '<div class="card"><div class="chart-title">Trend</div>' + buildWeightChart(pts) + '</div>'
+    : '<div class="empty-note">Log a second weight to see the trend chart.</div>';
+
+  let html = '';
+  for (const p of [...pts].reverse()) {
+    html +=
+      '<div class="wt-row">' +
+        '<span class="wt-date">' + fmtLong(p.date) + '</span>' +
+        '<span class="num">' + fmtLbs(p.lbs) + ' lbs</span>' +
+        '<button class="icon-btn" data-act="wt-del" data-date="' + p.date + '" aria-label="Delete weight for ' + p.date + '">' + I.del + '</button>' +
+      '</div>';
+  }
+  $('wt-list').innerHTML = html;
+}
+
+/* Line chart: recessive raw daily points, dominant 7-day-average trend line. */
+function buildWeightChart(pts) {
+  const W = 700, H = 260, L = 54, R = 86, T = 18, B = 32;
+  const plotW = W - L - R, plotH = H - T - B;
+  const minT = pts[0].t, maxT = pts[pts.length - 1].t;
+  const spanT = Math.max(maxT - minT, 1);
+  const vals = pts.flatMap(p => [p.lbs, p.avg]);
+  let vmin = Math.min(...vals), vmax = Math.max(...vals);
+  const padV = Math.max((vmax - vmin) * 0.15, 1.5);
+  vmin -= padV; vmax += padV;
+  const x = t => L + (t - minT) / spanT * plotW;
+  const y = v => T + (1 - (v - vmin) / (vmax - vmin)) * plotH;
+
+  const step = [0.5, 1, 2, 5, 10, 20].find(s => (vmax - vmin) / s <= 5) || 50;
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Weight over time with 7-day average trend" style="width:100%;height:auto">';
+  for (let v = Math.ceil(vmin / step) * step; v <= vmax; v += step) {
+    svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="rgba(255,255,255,.07)" stroke-width="1"/>';
+    svg += '<text x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end" font-size="12" fill="var(--muted)">' + v + '</text>';
+  }
+
+  // Raw daily readings: thin, faint — deliberately recessive
+  svg += '<polyline points="' + pts.map(p => x(p.t) + ',' + y(p.lbs)).join(' ') + '" fill="none" stroke="var(--faint)" stroke-width="1.5"/>';
+  for (const p of pts)
+    svg += '<circle cx="' + x(p.t) + '" cy="' + y(p.lbs) + '" r="3.5" fill="var(--faint)" stroke="#131822" stroke-width="2">' +
+      '<title>' + fmtShort(p.date) + ' — ' + fmtLbs(p.lbs) + ' lbs</title></circle>';
+
+  // 7-day average: the dominant line (the one that matters)
+  svg += '<polyline points="' + pts.map(p => x(p.t) + ',' + y(p.avg)).join(' ') + '" fill="none" stroke="var(--accent)" stroke-width="2.5"/>';
+
+  // Direct labels at the right edge (identity never rides on color alone)
+  const lastP = pts[pts.length - 1];
+  let yAvgLbl = y(lastP.avg), yRawLbl = y(lastP.lbs);
+  if (Math.abs(yAvgLbl - yRawLbl) < 16) yRawLbl = yAvgLbl + (yRawLbl >= yAvgLbl ? 16 : -16);
+  svg += '<text x="' + (W - R + 8) + '" y="' + (yAvgLbl + 4) + '" font-size="13" font-weight="700" fill="var(--accent)">7-day avg</text>';
+  svg += '<text x="' + (W - R + 8) + '" y="' + (yRawLbl + 4) + '" font-size="12" fill="var(--muted)">daily</text>';
+
+  // X labels: first and last date (middle too if the span is long)
+  svg += '<text x="' + L + '" y="' + (H - 10) + '" font-size="12" fill="var(--muted)">' + fmtShort(pts[0].date) + '</text>';
+  svg += '<text x="' + (W - R) + '" y="' + (H - 10) + '" text-anchor="end" font-size="12" fill="var(--muted)">' + fmtShort(lastP.date) + '</text>';
+  if (spanT > 14 * 86400000) {
+    const midT = minT + spanT / 2;
+    svg += '<text x="' + x(midT) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="12" fill="var(--muted)">' + fmtShort(dateKey(new Date(midT))) + '</text>';
+  }
+  svg += '</svg>';
+  return svg;
+}
+
+/* ---------------- Settings ---------------- */
+function renderSettings() {
+  $('set-cal').value = state.settings.calorieTarget;
+  $('set-pro').value = state.settings.proteinTarget;
+}
+
+/* ============================================================
+   5. EVENT HANDLERS
+   ============================================================ */
+function flagInvalid(input, bad) { input.setAttribute('aria-invalid', String(!!bad)); return !bad; }
+
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-act]');
+  if (!btn) return;
+  const act = btn.dataset.act;
+
+  switch (act) {
+    case 'tab': switchView(btn.dataset.view); break;
+
+    /* --- The logger: day list → day detail --- */
+    case 'open-day':
+      viewDate = btn.dataset.key;
+      editingEntryId = null; detailAddOpen = false;
+      hideQaForm();
+      renderDayDetail();
+      switchView('day');
+      break;
+    case 'day-back': switchView('today'); break;
+    case 'day-prev':
+      viewDate = shiftKey(viewDate, -1);
+      editingEntryId = null; hideQaForm(); renderDayDetail();
+      break;
+    case 'day-next':
+      if (viewDate < todayKey()) { viewDate = shiftKey(viewDate, 1); editingEntryId = null; hideQaForm(); renderDayDetail(); }
+      break;
+    case 'detail-add-toggle':
+      detailAddOpen = !detailAddOpen;
+      if (!detailAddOpen) hideQaForm();
+      renderDayDetail();
+      break;
+
+    /* --- Quick-log --- */
+    case 'log': logMeal(btn.dataset.id, 1); break;
+    case 'qty-toggle':
+      openQtyMealId = (openQtyMealId === btn.dataset.id) ? null : btn.dataset.id;
+      renderQuicklog();
+      break;
+    case 'logqty':
+      logMeal(btn.dataset.id, parseFloat(btn.dataset.qty));
+      openQtyMealId = null;
+      renderQuicklog();
+      break;
+    case 'goto-meals':
+      switchView('library');
+      if ($('lib-form').hidden && state.library.length === 0) {
+        $('lib-form').hidden = false;
+        $('lib-add-toggle').setAttribute('aria-expanded', 'true');
+      }
+      if (!$('lib-form').hidden) $('lib-name').focus();
+      break;
+
+    /* --- One-off quick-add: move the shared form into the grid that asked --- */
+    case 'qa-toggle': {
+      const form = $('qa-form');
+      const mount = btn.parentElement.querySelector('.qa-mount');
+      const alreadyHere = !form.hidden && form.parentElement === mount;
+      if (alreadyHere) { hideQaForm(); break; }
+      mount.appendChild(form);
+      form.hidden = false;
+      $('qa-name').focus();
+      break;
+    }
+
+    /* --- Entry edit/delete (inside day detail) --- */
+    case 'entry-del':
+      deleteEntry(viewDate, btn.dataset.id);
+      renderAfterLogChange();
+      break;
+    case 'entry-edit': editingEntryId = btn.dataset.id; renderEntries(); break;
+    case 'entry-cancel': editingEntryId = null; renderEntries(); break;
+    case 'entry-save': {
+      const form = btn.closest('.entry-edit');
+      const entry = dayEntries(viewDate).find(x => x.id === form.dataset.id);
+      if (!entry) { editingEntryId = null; renderEntries(); break; }
+      const name = form.querySelector('.ee-name').value.trim();
+      const cal = toNum(form.querySelector('.ee-cal').value);
+      const pro = toNum(form.querySelector('.ee-pro').value);
+      const qty = toNum(form.querySelector('.ee-qty').value, 0.01);
+      const ok = flagInvalid(form.querySelector('.ee-name'), !name) &
+                 flagInvalid(form.querySelector('.ee-cal'), cal == null) &
+                 flagInvalid(form.querySelector('.ee-pro'), pro == null) &
+                 flagInvalid(form.querySelector('.ee-qty'), qty == null);
+      if (!ok) break;
+      Object.assign(entry, { name, calories: cal, protein: pro, qty });
+      save();
+      editingEntryId = null;
+      renderAfterLogChange();
+      break;
+    }
+
+    /* --- Library management --- */
+    case 'lib-add-toggle': {
+      const f = $('lib-form'); f.hidden = !f.hidden;
+      btn.setAttribute('aria-expanded', String(!f.hidden));
+      if (!f.hidden) $('lib-name').focus();
+      break;
+    }
+    case 'filter':
+      activeTag = btn.dataset.tag;
+      renderChips(); renderQuicklog(); renderLibrary();
+      break;
+    case 'meal-edit': editingMealId = btn.dataset.id; renderLibrary(); break;
+    case 'meal-cancel': editingMealId = null; renderLibrary(); break;
+    case 'meal-save': {
+      const form = btn.closest('.lib-edit-form');
+      const meal = state.library.find(m => m.id === form.dataset.id);
+      if (!meal) { editingMealId = null; renderLibrary(); break; }
+      const name = form.querySelector('.le-name').value.trim();
+      const cal = toNum(form.querySelector('.le-cal').value);
+      const pro = toNum(form.querySelector('.le-pro').value);
+      const ok = flagInvalid(form.querySelector('.le-name'), !name) &
+                 flagInvalid(form.querySelector('.le-cal'), cal == null) &
+                 flagInvalid(form.querySelector('.le-pro'), pro == null);
+      if (!ok) break;
+      Object.assign(meal, {
+        name, calories: cal, protein: pro,
+        note: form.querySelector('.le-note').value.trim(),
+        tag: form.querySelector('.le-tag').value,
+      });
+      save();
+      editingMealId = null;
+      renderChips(); renderLibrary(); renderQuicklog();
+      break;
+    }
+    case 'meal-del': {
+      const meal = state.library.find(m => m.id === btn.dataset.id);
+      if (meal && confirm('Delete "' + meal.name + '" from your library? Already-logged entries keep their values.')) {
+        state.library = state.library.filter(m => m.id !== meal.id);
+        save();
+        renderChips(); renderLibrary(); renderQuicklog();
+      }
+      break;
+    }
+
+    /* --- Week --- */
+    case 'week-prev': weekOffset -= 1; renderWeek(); break;
+    case 'week-next': if (weekOffset < 0) { weekOffset += 1; renderWeek(); } break;
+
+    /* --- Weight --- */
+    case 'wt-del':
+      if (confirm('Delete the weight logged on ' + btn.dataset.date + '?')) {
+        state.weights = state.weights.filter(w => w.date !== btn.dataset.date);
+        save(); renderWeight();
+      }
+      break;
+
+    /* --- Settings data actions --- */
+    case 'export': exportData(); break;
+    case 'import': $('import-file').click(); break;
+    case 'clear':
+      if (confirm('Delete ALL data — every logged day, your meal library, and weights? This cannot be undone. (Consider exporting first.)')) {
+        state = defaultState();
+        save();
+        viewDate = todayKey(); weekOffset = 0; activeTag = 'all';
+        editingEntryId = editingMealId = openQtyMealId = null;
+        detailAddOpen = false; hideQaForm();
+        renderAll();
+        switchView('today');
+      }
+      break;
+  }
+});
+
+function hideQaForm() {
+  const form = $('qa-form');
+  form.hidden = true;
+  form.reset();
+  $('qa-tag-wrap').hidden = true;
+  document.querySelector('main').appendChild(form); // park it outside the grids
+}
+
+/* --- Quick-add form submit (logs to today or the open day detail) --- */
+$('qa-save').addEventListener('change', () => { $('qa-tag-wrap').hidden = !$('qa-save').checked; });
+$('qa-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('qa-name').value.trim();
+  const cal = toNum($('qa-cal').value);
+  const pro = toNum($('qa-pro').value);
+  const ok = flagInvalid($('qa-name'), !name) & flagInvalid($('qa-cal'), cal == null) & flagInvalid($('qa-pro'), pro == null);
+  if (!ok) return;
+  let mealId = null;
+  if ($('qa-save').checked) {
+    mealId = uid();
+    state.library.push({ id: mealId, name, calories: cal, protein: pro, note: '', tag: $('qa-tag').value, useCount: 1 });
+  }
+  addEntry(activeDayKey(), { name, calories: cal, protein: pro, qty: 1, mealId });
+  hideQaForm();
+  renderChips();
+  renderAfterLogChange();
+});
+
+/* --- New-meal form (library) --- */
+$('lib-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('lib-name').value.trim();
+  const cal = toNum($('lib-cal').value);
+  const pro = toNum($('lib-pro').value);
+  const ok = flagInvalid($('lib-name'), !name) & flagInvalid($('lib-cal'), cal == null) & flagInvalid($('lib-pro'), pro == null);
+  if (!ok) return;
+  state.library.push({
+    id: uid(), name, calories: cal, protein: pro,
+    note: $('lib-note').value.trim(), tag: $('lib-tag').value, useCount: 0,
+  });
+  save();
+  $('lib-form').reset();
+  renderChips(); renderLibrary(); renderQuicklog();
+  $('lib-name').focus(); // ready for the next one
+});
+
+/* --- Weight form --- */
+$('wt-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const date = $('wt-date').value;
+  const lbs = toNum($('wt-lbs').value, 0.1);
+  const ok = flagInvalid($('wt-date'), !/^\d{4}-\d{2}-\d{2}$/.test(date)) & flagInvalid($('wt-lbs'), lbs == null);
+  if (!ok) return;
+  upsertWeight(date, lbs);
+  $('wt-lbs').value = '';
+  renderWeight();
+});
+
+/* --- Settings form --- */
+$('settings-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const cal = toNum($('set-cal').value, 1);
+  const pro = toNum($('set-pro').value, 1);
+  const ok = flagInvalid($('set-cal'), cal == null) & flagInvalid($('set-pro'), pro == null);
+  if (!ok) return;
+  state.settings.calorieTarget = cal;
+  state.settings.proteinTarget = pro;
+  save();
+  renderAll();
+  $('save-note').hidden = false;
+  setTimeout(() => { $('save-note').hidden = true; }, 2000);
+});
+
+/* --- Export / import --- */
+function exportData() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'calorie-tracker-backup-' + todayKey() + '.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+$('import-file').addEventListener('change', () => {
+  const file = $('import-file').files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    let incoming;
+    try {
+      incoming = JSON.parse(reader.result);
+    } catch (err) {
+      alert('That file isn’t valid JSON — nothing was imported.');
+      return;
+    }
+    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming) ||
+        !(incoming.settings || incoming.library || incoming.days || incoming.weights)) {
+      alert('That file doesn’t look like a tracker backup — nothing was imported.');
+      return;
+    }
+    const migrated = migrate(incoming);
+    const nDays = Object.keys(migrated.days).length;
+    if (!confirm('Import backup?\n\n' + migrated.library.length + ' saved meals · ' + nDays + ' logged days · ' + migrated.weights.length + ' weights\n\nThis REPLACES all current data.')) return;
+    state = migrated;
+    save();
+    viewDate = todayKey(); weekOffset = 0; activeTag = 'all';
+    editingEntryId = editingMealId = openQtyMealId = null;
+    detailAddOpen = false; hideQaForm();
+    renderAll();
+    switchView('today');
+    alert('Import complete.');
+  };
+  reader.readAsText(file);
+  $('import-file').value = ''; // allow re-importing the same file later
+});
+
+/* --- Midnight rollover: if the local date changes while the page is open,
+       the Today screen moves to the new day. Past data is untouched (it
+       lives under its own date key). --- */
+function checkRollover() {
+  const now = todayKey();
+  if (now !== lastKnownToday) {
+    if (viewDate === lastKnownToday) viewDate = now;
+    lastKnownToday = now;
+    renderAll();
+  }
+}
+setInterval(checkRollover, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkRollover(); });
+window.addEventListener('focus', checkRollover);
+
+/* ============================================================
+   6. INIT
+   ============================================================ */
+loadState();
+renderAll();
+switchView('today');
+
+/* PWA service worker: makes the hosted app load instantly and work fully
+   offline. Only registers on https/localhost — opening the file directly
+   from disk still works exactly as before. */
+if ('serviceWorker' in navigator &&
+    (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => { /* non-fatal */ });
+  });
+}
+</script>
+</body>
+</html>
