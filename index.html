@@ -568,6 +568,7 @@ label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted)
     <div class="card settings-actions">
       <button class="btn" data-act="export">Export all data (JSON)</button>
       <button class="btn" data-act="import">Import from JSON file…</button>
+      <button class="btn" data-act="import-paste">Import by paste…</button>
       <input type="file" id="import-file" accept=".json,application/json" hidden>
       <button class="btn btn-danger" data-act="clear">Clear all data…</button>
       <div class="setting-desc" id="storage-note"></div>
@@ -1547,6 +1548,14 @@ document.addEventListener('click', e => {
     /* --- Settings data actions --- */
     case 'export': exportData(); break;
     case 'import': $('import-file').click(); break;
+    case 'import-paste': {
+      const txt = prompt('Paste your exported tracker data (JSON) here:');
+      if (!txt) break;
+      let obj = null;
+      try { obj = JSON.parse(txt.trim()); } catch (err) { alert('Couldn’t read that — it isn’t valid JSON.'); break; }
+      applyImport(obj);
+      break;
+    }
     case 'clear':
       if (confirm('Delete ALL data — every logged day, your meal library, and weights? This cannot be undone. (Consider exporting first.)')) {
         state = defaultState();
@@ -1646,6 +1655,26 @@ function exportData() {
   URL.revokeObjectURL(a.href);
 }
 
+/* Shared by both import paths (file and paste): validate, confirm, apply. */
+function applyImport(incoming) {
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming) ||
+      !(incoming.settings || incoming.library || incoming.days || incoming.weights)) {
+    alert('That doesn’t look like tracker data — nothing was imported.');
+    return;
+  }
+  const migrated = migrate(incoming);
+  const nDays = Object.keys(migrated.days).length;
+  if (!confirm('Import data?\n\n' + migrated.library.length + ' saved meals · ' + nDays + ' logged days · ' + migrated.weights.length + ' weights\n\nThis REPLACES all current data.')) return;
+  state = migrated;
+  save();
+  viewDate = todayKey(); weekOffset = 0; activeTag = 'all';
+  editingEntryId = editingMealId = openQtyMealId = null;
+  detailAddOpen = false; hideQaForm();
+  renderAll();
+  switchView('today');
+  alert('Import complete.');
+}
+
 $('import-file').addEventListener('change', () => {
   const file = $('import-file').files[0];
   if (!file) return;
@@ -1658,22 +1687,7 @@ $('import-file').addEventListener('change', () => {
       alert('That file isn’t valid JSON — nothing was imported.');
       return;
     }
-    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming) ||
-        !(incoming.settings || incoming.library || incoming.days || incoming.weights)) {
-      alert('That file doesn’t look like a tracker backup — nothing was imported.');
-      return;
-    }
-    const migrated = migrate(incoming);
-    const nDays = Object.keys(migrated.days).length;
-    if (!confirm('Import backup?\n\n' + migrated.library.length + ' saved meals · ' + nDays + ' logged days · ' + migrated.weights.length + ' weights\n\nThis REPLACES all current data.')) return;
-    state = migrated;
-    save();
-    viewDate = todayKey(); weekOffset = 0; activeTag = 'all';
-    editingEntryId = editingMealId = openQtyMealId = null;
-    detailAddOpen = false; hideQaForm();
-    renderAll();
-    switchView('today');
-    alert('Import complete.');
+    applyImport(incoming);
   };
   reader.readAsText(file);
   $('import-file').value = ''; // allow re-importing the same file later
