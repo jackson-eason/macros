@@ -2,7 +2,7 @@
    Strategy: network-first with cache fallback — you always get the newest
    version when online, and the full app when offline.
    Bump CACHE_VERSION whenever you deploy a change. */
-const CACHE_VERSION = 'tracker-v2';
+const CACHE_VERSION = 'tracker-v3';
 const ASSETS = [
   './',
   './index.html',

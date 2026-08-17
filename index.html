@@ -321,6 +321,25 @@ label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted)
 .entry-edit .ee-name { flex: 2 1 100%; }
 .log-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* Cardio: burned calories, shown as a subtraction */
+.bar-breakdown { margin-top: 6px; font-size: 13px; color: var(--muted); }
+.bar-breakdown .bd-sep { margin: 0 2px; }
+.bar-breakdown .bd-burn { color: var(--accent); font-weight: 650; }
+.entry-group-head {
+  font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em;
+  padding: 14px 0 6px; border-top: 1px solid var(--border); margin-top: 4px;
+}
+.entry-group-head .mut { text-transform: none; letter-spacing: 0; font-weight: 600; }
+.entry-row.is-cardio .entry-name { color: var(--text); }
+.cardio-ic { display: inline-flex; color: var(--accent); margin-right: 4px; flex-shrink: 0; }
+.cardio-ic svg { width: 20px; height: 20px; }
+.entry-cal.burn { color: var(--accent); }
+.add-tile-cardio { flex-direction: row; gap: 7px; }
+.add-tile-cardio svg { width: 20px; height: 20px; }
+.cardio-card { border-color: rgba(90,169,255,.3); }
+.cardio-head { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+.cardio-head .mut { font-weight: 500; font-size: 13px; }
+
 /* ============================================================
    LIBRARY VIEW
    ============================================================ */
@@ -609,6 +628,21 @@ label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted)
     <button class="btn btn-primary btn-block" type="submit">Add to this day</button>
   </form>
 
+  <!-- Cardio form: shared the same way as the one-off form. Calories entered
+       here are SUBTRACTED from the day's total. -->
+  <form class="card cardio-card" id="cardio-form" hidden>
+    <div class="cardio-head">Log cardio <span class="mut">— burned calories come off today's total</span></div>
+    <div class="field">
+      <label for="cardio-name">Activity</label>
+      <input type="text" id="cardio-name" autocomplete="off" placeholder="e.g. Treadmill 30 min">
+    </div>
+    <div class="field">
+      <label for="cardio-cal">Calories burned</label>
+      <input type="number" id="cardio-cal" min="0" step="any" inputmode="decimal" placeholder="0">
+    </div>
+    <button class="btn btn-primary btn-block" type="submit">Subtract from this day</button>
+  </form>
+
 </main>
 
 <nav id="tabbar" aria-label="Main navigation">
@@ -655,6 +689,7 @@ const I = {
   plus:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   dots:  '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5.5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18.5" r="1.8"/></svg>',
   chev:  '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6l6 6-6 6"/></svg>',
+  run:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="14.5" cy="4.5" r="1.8"/><path d="M13.2 8.2 9.6 10.4l-1.4 3.6M13.2 8.2l2.6 3.2 3.4.9M13.2 8.2 11.7 13l3 2.6-1.4 5M11.7 13l-3.6 1.2L5.5 18"/></svg>',
 };
 
 // Thousands-separated integer display
@@ -748,6 +783,7 @@ function migrate(raw) {
       e.calories = toNum(e.calories) ?? 0;
       e.protein  = toNum(e.protein)  ?? 0;
       e.qty = toNum(e.qty) || 1;
+      if (e.type !== 'cardio') delete e.type; // food entries carry no type
     });
     if (day.entries.length === 0) delete d.days[key];
   }
@@ -799,10 +835,27 @@ function save() {
    ============================================================ */
 function dayEntries(key) { return (state.days[key] && state.days[key].entries) || []; }
 
+/* Totals for a day. Food adds calories; cardio SUBTRACTS them (net calories
+   is what the bars, week, and history all use). Protein comes only from food.
+   `eaten`/`burned` are the gross figures for display. */
 function dayTotals(key) {
-  let cal = 0, pro = 0;
-  for (const e of dayEntries(key)) { cal += e.calories * e.qty; pro += e.protein * e.qty; }
-  return { cal, pro };
+  let eaten = 0, burned = 0, pro = 0;
+  for (const e of dayEntries(key)) {
+    if (e.type === 'cardio') burned += e.calories;
+    else { eaten += e.calories * e.qty; pro += e.protein * e.qty; }
+  }
+  return { cal: eaten - burned, eaten, burned, pro };
+}
+const foodEntries   = key => dayEntries(key).filter(e => e.type !== 'cardio');
+const cardioEntries = key => dayEntries(key).filter(e => e.type === 'cardio');
+
+function addCardio(key, { name, calories }) {
+  if (!state.days[key]) state.days[key] = { entries: [] };
+  state.days[key].entries.push({
+    id: uid(), type: 'cardio', name, calories, protein: 0, qty: 1,
+    mealId: null, loggedAt: new Date().toISOString(),
+  });
+  save();
 }
 
 function addEntry(key, { name, calories, protein, qty = 1, mealId = null }) {
@@ -894,11 +947,12 @@ function switchView(view) {
 
 /* ---------------- Shared: the two target bars for any day ---------------- */
 function barsHtml(key) {
-  const { cal, pro } = dayTotals(key);
+  const { cal, eaten, burned, pro } = dayTotals(key);
   const calT = state.settings.calorieTarget, proT = state.settings.proteinTarget;
 
-  /* Calorie bar: a CEILING. Green under, amber in the last ~10%, red over. */
-  const calPct = Math.min(cal / calT, 1) * 100;
+  /* Calorie bar: a CEILING on NET calories (eaten − cardio). Green under,
+     amber in the last ~10%, red over. */
+  const calPct = Math.max(0, Math.min(cal / calT, 1)) * 100;
   let calFill, calStatus, calClass;
   if (cal > calT)             { calFill = 'fill-red';   calClass = 'st-red';   calStatus = fmt(cal - calT) + ' over the ceiling'; }
   else if (cal >= calT * 0.9) { calFill = 'fill-amber'; calClass = 'st-amber'; calStatus = fmt(calT - cal) + ' left — close to the ceiling'; }
@@ -932,13 +986,16 @@ function barsHtml(key) {
 
   return (
     '<div class="bar-block">' +
-      '<div class="bar-head"><span class="bar-title">Calories</span>' +
+      '<div class="bar-head"><span class="bar-title">' + (burned > 0 ? 'Net calories' : 'Calories') + '</span>' +
       '<span class="bar-nums">' + fmt(cal) + ' <span class="of">/ ' + fmt(calT) + '</span></span></div>' +
       '<div class="bar-track" role="progressbar" aria-label="Calories" aria-valuemin="0" aria-valuemax="' + calT + '" aria-valuenow="' + Math.round(cal) + '">' +
         '<div class="bar-fill ' + calFill + '" style="width:' + calPct + '%"></div>' +
       '</div>' +
       '<div class="bar-foot"><span class="bar-status ' + calClass + '">' + calStatus + '</span>' +
       '<span class="bar-pct">' + Math.round(cal / calT * 100) + '%</span></div>' +
+      (burned > 0
+        ? '<div class="bar-breakdown num">' + fmt(eaten) + ' eaten <span class="bd-sep">−</span> <span class="bd-burn">' + fmt(burned) + ' burned</span></div>'
+        : '') +
     '</div>' +
     '<div class="bar-block">' +
       '<div class="bar-head"><span class="bar-title">Protein</span>' +
@@ -972,14 +1029,16 @@ function renderDayList() {
     const t = dayTotals(k);
     const d = parseKey(k);
     const label = k === tKey ? 'Today' : (k === shiftKey(tKey, -1) ? 'Yesterday' : DOW[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate());
+    const nFood = entries.filter(e => e.type !== 'cardio').length;
     const sub = entries.length === 0 ? 'nothing logged yet'
-      : entries.length + (entries.length === 1 ? ' meal' : ' meals') +
+      : nFood + (nFood === 1 ? ' meal' : ' meals') +
+        (t.burned > 0 ? ' · cardio −' + fmt(t.burned) : '') +
         (d.getFullYear() !== new Date().getFullYear() ? ' · ' + d.getFullYear() : '');
     html +=
       '<button class="day-row" data-act="open-day" data-key="' + k + '">' +
         '<span class="d-date">' + label + '<small>' + sub + '</small></span>' +
         (entries.length
-          ? '<span class="d-nums"><b>' + fmt(t.cal) + '</b> cal<br>' + fmtG(t.pro) + 'g protein</span>' +
+          ? '<span class="d-nums"><b>' + fmt(t.cal) + '</b>' + (t.burned > 0 ? ' net' : '') + ' cal<br>' + fmtG(t.pro) + 'g protein</span>' +
             '<span class="dots">' +
               '<span class="dot ' + (t.cal <= calT ? 'dot-green' : 'dot-red') + '" title="Calories ' + (t.cal <= calT ? 'under' : 'over') + ' target" aria-label="Calories ' + (t.cal <= calT ? 'under' : 'over') + ' target"></span>' +
               '<span class="dot ' + (t.pro >= proT ? 'dot-green' : 'dot-grey') + '" title="Protein floor ' + (t.pro >= proT ? 'hit' : 'missed') + '" aria-label="Protein floor ' + (t.pro >= proT ? 'hit' : 'missed') + '"></span>' +
@@ -1006,17 +1065,18 @@ function renderDayDetail() {
 }
 
 function renderEntries() {
-  const entries = dayEntries(viewDate);
+  const food = foodEntries(viewDate), cardio = cardioEntries(viewDate);
   const t = dayTotals(viewDate);
-  $('log-count').textContent = entries.length
-    ? entries.length + (entries.length === 1 ? ' meal · ' : ' meals · ') + fmt(t.cal) + ' cal · ' + fmtG(t.pro) + 'g'
+  $('log-count').textContent = food.length + cardio.length
+    ? food.length + (food.length === 1 ? ' meal · ' : ' meals · ') + fmt(t.cal) + ' net cal · ' + fmtG(t.pro) + 'g'
     : '';
-  if (entries.length === 0) {
-    $('entry-list').innerHTML = '<div class="empty-note">Nothing logged on this day.<br>Use “Add food” below to log to it.</div>';
+  if (food.length + cardio.length === 0) {
+    $('entry-list').innerHTML = '<div class="empty-note">Nothing logged on this day.<br>Use “Add food” or “Log cardio” below.</div>';
     return;
   }
   let html = '';
-  for (const e of entries) {
+  if (food.length === 0) html += '<div class="empty-note" style="padding:10px 4px">No food logged.</div>';
+  for (const e of food) {
     if (e.id === editingEntryId) {
       html +=
         '<div class="entry-edit" data-id="' + e.id + '">' +
@@ -1041,6 +1101,35 @@ function renderEntries() {
           '<button class="icon-btn" data-act="entry-edit" data-id="' + e.id + '" aria-label="Edit ' + esc(e.name) + '">' + I.edit + '</button>' +
           '<button class="icon-btn" data-act="entry-del" data-id="' + e.id + '" aria-label="Delete ' + esc(e.name) + '">' + I.del + '</button>' +
         '</div>';
+    }
+  }
+  // Cardio: its own group, calories shown as a subtraction
+  if (cardio.length) {
+    html += '<div class="entry-group-head">Cardio <span class="mut">· −' + fmt(t.burned) + ' cal</span></div>';
+    for (const e of cardio) {
+      if (e.id === editingEntryId) {
+        html +=
+          '<div class="entry-edit" data-id="' + e.id + '" data-kind="cardio">' +
+            '<input class="ee-name" type="text" value="' + esc(e.name) + '" aria-label="Activity">' +
+            '<input class="ee-cal" type="number" min="0" step="any" inputmode="decimal" value="' + e.calories + '" aria-label="Calories burned">' +
+            '<button class="btn btn-sm btn-primary" type="button" data-act="entry-save">Save</button>' +
+            '<button class="btn btn-sm" type="button" data-act="entry-cancel">Cancel</button>' +
+          '</div>';
+      } else {
+        const time = fmtTime(e.loggedAt, viewDate);
+        html +=
+          '<div class="entry-row is-cardio">' +
+            '<span class="cardio-ic">' + I.run + '</span>' +
+            '<div class="entry-main">' +
+              '<div class="entry-name">' + esc(e.name) + '</div>' +
+              (time ? '<div class="entry-time">' + time + '</div>' : '') +
+            '</div>' +
+            '<span class="entry-cal num burn">−' + fmt(e.calories) + '<small> cal</small></span>' +
+            '<span class="entry-pro num"></span>' +
+            '<button class="icon-btn" data-act="entry-edit" data-id="' + e.id + '" aria-label="Edit ' + esc(e.name) + '">' + I.edit + '</button>' +
+            '<button class="icon-btn" data-act="entry-del" data-id="' + e.id + '" aria-label="Delete ' + esc(e.name) + '">' + I.del + '</button>' +
+          '</div>';
+      }
     }
   }
   $('entry-list').innerHTML = html;
@@ -1094,8 +1183,9 @@ function quicklogHtml() {
       }
     }
   }
-  // One-off tile + a mount slot the shared quick-add form moves into
+  // One-off + cardio tiles, plus a mount slot the shared forms move into
   html += '<button class="add-tile" data-act="qa-toggle">' + I.plus + ' One-off</button>';
+  html += '<button class="add-tile add-tile-cardio" data-act="cardio-toggle">' + I.run + ' Log cardio</button>';
   html += '<div class="qa-mount"></div>';
   return html;
 }
@@ -1103,14 +1193,17 @@ function quicklogHtml() {
 /* Render into both grids (Today's and the day detail's). The single #qa-form
    node is re-mounted afterwards so an open form isn't lost on re-render. */
 function renderQuicklog() {
-  const form = $('qa-form');
-  const wasOpenIn = !form.hidden ? form.closest('section')?.id : null;
+  // Remember where each shared form was open (if anywhere) before we wipe the grids
+  const forms = [$('qa-form'), $('cardio-form')];
+  const openIn = forms.map(f => (!f.hidden ? f.closest('section')?.id : null));
   const html = quicklogHtml();
   $('quicklog-grid').innerHTML = html;
   $('detail-quicklog').innerHTML = html;
-  if (wasOpenIn === 'view-today') $('quicklog-grid').querySelector('.qa-mount').appendChild(form);
-  else if (wasOpenIn === 'view-day') $('detail-quicklog').querySelector('.qa-mount').appendChild(form);
-  else document.querySelector('main').appendChild(form); // parked, hidden
+  forms.forEach((f, i) => {
+    if (openIn[i] === 'view-today') $('quicklog-grid').querySelector('.qa-mount').appendChild(f);
+    else if (openIn[i] === 'view-day') $('detail-quicklog').querySelector('.qa-mount').appendChild(f);
+    else document.querySelector('main').appendChild(f); // parked, hidden
+  });
 }
 
 /* ---------------- Library management ---------------- */
@@ -1451,16 +1544,12 @@ document.addEventListener('click', e => {
       break;
 
     /* --- One-off quick-add: move the shared form into the grid that asked --- */
-    case 'qa-toggle': {
-      const form = $('qa-form');
-      const mount = btn.parentElement.querySelector('.qa-mount');
-      const alreadyHere = !form.hidden && form.parentElement === mount;
-      if (alreadyHere) { hideQaForm(); break; }
-      mount.appendChild(form);
-      form.hidden = false;
-      $('qa-name').focus();
+    case 'qa-toggle':
+      openSharedForm($('qa-form'), btn.parentElement.querySelector('.qa-mount'), 'qa-name');
       break;
-    }
+    case 'cardio-toggle':
+      openSharedForm($('cardio-form'), btn.parentElement.querySelector('.qa-mount'), 'cardio-name');
+      break;
 
     /* --- Entry edit/delete (inside day detail) --- */
     case 'entry-del':
@@ -1475,6 +1564,15 @@ document.addEventListener('click', e => {
       if (!entry) { editingEntryId = null; renderEntries(); break; }
       const name = form.querySelector('.ee-name').value.trim();
       const cal = toNum(form.querySelector('.ee-cal').value);
+      if (form.dataset.kind === 'cardio') {
+        // Cardio edit form only has name + calories burned
+        const okC = flagInvalid(form.querySelector('.ee-name'), !name) &
+                    flagInvalid(form.querySelector('.ee-cal'), cal == null);
+        if (!okC) break;
+        Object.assign(entry, { name, calories: cal });
+        save(); editingEntryId = null; renderAfterLogChange();
+        break;
+      }
       const pro = toNum(form.querySelector('.ee-pro').value);
       const qty = toNum(form.querySelector('.ee-qty').value, 0.01);
       const ok = flagInvalid(form.querySelector('.ee-name'), !name) &
@@ -1570,12 +1668,23 @@ document.addEventListener('click', e => {
   }
 });
 
+/* Hide + reset + park BOTH shared forms (one-off food and cardio). */
 function hideQaForm() {
-  const form = $('qa-form');
-  form.hidden = true;
-  form.reset();
+  for (const form of [$('qa-form'), $('cardio-form')]) {
+    form.hidden = true;
+    form.reset();
+    document.querySelector('main').appendChild(form); // park it outside the grids
+  }
   $('qa-tag-wrap').hidden = true;
-  document.querySelector('main').appendChild(form); // park it outside the grids
+}
+/* Open one shared form inside the grid that asked; closes the other. */
+function openSharedForm(form, mount, focusId) {
+  const alreadyHere = !form.hidden && form.parentElement === mount;
+  hideQaForm();
+  if (alreadyHere) return; // second tap on the same tile = close
+  mount.appendChild(form);
+  form.hidden = false;
+  $(focusId).focus();
 }
 
 /* --- Quick-add form submit (logs to today or the open day detail) --- */
@@ -1595,6 +1704,18 @@ $('qa-form').addEventListener('submit', e => {
   addEntry(activeDayKey(), { name, calories: cal, protein: pro, qty: 1, mealId });
   hideQaForm();
   renderChips();
+  renderAfterLogChange();
+});
+
+/* --- Cardio form submit (subtracts from today or the open day detail) --- */
+$('cardio-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('cardio-name').value.trim() || 'Cardio';
+  const cal = toNum($('cardio-cal').value);
+  if (!flagInvalid($('cardio-cal'), cal == null || cal === 0)) return;
+  addCardio(activeDayKey(), { name, calories: cal });
+  if (navigator.vibrate) navigator.vibrate(10);
+  hideQaForm();
   renderAfterLogChange();
 });
 
