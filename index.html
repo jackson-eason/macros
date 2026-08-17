@@ -992,7 +992,7 @@ function barsHtml(key) {
         '<div class="bar-fill ' + calFill + '" style="width:' + calPct + '%"></div>' +
       '</div>' +
       '<div class="bar-foot"><span class="bar-status ' + calClass + '">' + calStatus + '</span>' +
-      '<span class="bar-pct">' + Math.round(cal / calT * 100) + '%</span></div>' +
+      '<span class="bar-pct">' + Math.max(0, Math.round(cal / calT * 100)) + '%</span></div>' +
       (burned > 0
         ? '<div class="bar-breakdown num">' + fmt(eaten) + ' eaten <span class="bd-sep">−</span> <span class="bd-burn">' + fmt(burned) + ' burned</span></div>'
         : '') +
@@ -1125,7 +1125,6 @@ function renderEntries() {
               (time ? '<div class="entry-time">' + time + '</div>' : '') +
             '</div>' +
             '<span class="entry-cal num burn">−' + fmt(e.calories) + '<small> cal</small></span>' +
-            '<span class="entry-pro num"></span>' +
             '<button class="icon-btn" data-act="entry-edit" data-id="' + e.id + '" aria-label="Edit ' + esc(e.name) + '">' + I.edit + '</button>' +
             '<button class="icon-btn" data-act="entry-del" data-id="' + e.id + '" aria-label="Delete ' + esc(e.name) + '">' + I.del + '</button>' +
           '</div>';
