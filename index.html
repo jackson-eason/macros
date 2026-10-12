@@ -256,6 +256,7 @@ label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted)
 }
 .meal-macros { display: block; margin-top: 3px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .meal-macros b { color: var(--accent); font-weight: 650; }
+.meal-sodium { display: block; margin-top: 1px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .meal-more {
   display: flex; align-items: center; justify-content: center;
   min-width: 42px; border-left: 1px solid var(--border); color: var(--muted);
@@ -320,6 +321,20 @@ label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted)
 .entry-edit input { flex: 1; min-width: 62px; }
 .entry-edit .ee-name { flex: 2 1 100%; }
 .log-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Sodium: an informational line under the target bars (no target, no bar) */
+.sodium-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+.sodium-val { font-size: 22px; font-weight: 800; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.sodium-val .of { font-size: 14px; font-weight: 550; color: var(--muted); letter-spacing: 0; }
+.sodium-note { margin-top: 3px; font-size: 12.5px; color: var(--muted); text-align: right; }
+
+/* Labeled edit form for a logged food entry (two columns of numbers) */
+.entry-edit.ee-food { display: block; }
+.ee-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.ee-actions { display: flex; gap: 8px; }
 
 /* Cardio: burned calories, shown as a subtraction */
 .bar-breakdown { margin-top: 6px; font-size: 13px; color: var(--muted); }
@@ -498,6 +513,10 @@ label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted)
           <label for="lib-pro">Protein (g)</label>
           <input type="number" id="lib-pro" min="0" step="any" inputmode="decimal" placeholder="0">
         </div>
+        <div class="field">
+          <label for="lib-sod">Sodium (mg)</label>
+          <input type="number" id="lib-sod" min="0" step="any" inputmode="decimal" placeholder="optional">
+        </div>
       </div>
       <div class="field">
         <label for="lib-note">Note (e.g. serving size)</label>
@@ -610,6 +629,10 @@ label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted)
         <label for="qa-pro">Protein (g)</label>
         <input type="number" id="qa-pro" min="0" step="any" inputmode="decimal" placeholder="0">
       </div>
+      <div class="field">
+        <label for="qa-sod">Sodium (mg)</label>
+        <input type="number" id="qa-sod" min="0" step="any" inputmode="decimal" placeholder="optional">
+      </div>
     </div>
     <div class="field check-row">
       <input type="checkbox" id="qa-save">
@@ -712,6 +735,16 @@ function toNum(v, min = 0) {
   return (Number.isFinite(n) && n >= min) ? n : null;
 }
 
+// Parse an OPTIONAL numeric input (sodium). Blank -> null, meaning "not
+// entered", which is different from an entered 0. Returns undefined when the
+// value is present but invalid (e.g. negative), so the caller can flag it.
+function optNum(v) {
+  if (v == null || String(v).trim() === '') return null;
+  return toNum(v) ?? undefined;
+}
+// Format sodium for display: "1,240 mg"
+const fmtMg = n => fmt(n) + ' mg';
+
 /* ---- Local-timezone date keys. NEVER toISOString() for day keys:
         it converts to UTC and files late-night meals under the wrong day. ---- */
 const pad2 = n => String(n).padStart(2, '0');
@@ -770,6 +803,7 @@ function migrate(raw) {
     m.id = m.id || uid();
     m.calories = toNum(m.calories) ?? 0;
     m.protein  = toNum(m.protein)  ?? 0;
+    m.sodium   = toNum(m.sodium);       // optional: null = not entered
     m.note = m.note || ''; m.tag = m.tag || '';
     m.useCount = toNum(m.useCount) ?? 0;
   });
@@ -782,6 +816,7 @@ function migrate(raw) {
       e.id = e.id || uid();
       e.calories = toNum(e.calories) ?? 0;
       e.protein  = toNum(e.protein)  ?? 0;
+      e.sodium   = e.type === 'cardio' ? null : toNum(e.sodium); // optional
       e.qty = toNum(e.qty) || 1;
       if (e.type !== 'cardio') delete e.type; // food entries carry no type
     });
@@ -837,14 +872,16 @@ function dayEntries(key) { return (state.days[key] && state.days[key].entries) |
 
 /* Totals for a day. Food adds calories; cardio SUBTRACTS them (net calories
    is what the bars, week, and history all use). Protein comes only from food.
-   `eaten`/`burned` are the gross figures for display. */
+   `eaten`/`burned` are the gross figures for display. Sodium is optional per
+   entry: `sodiumCount` of `foodCount` entries actually have it filled in. */
 function dayTotals(key) {
-  let eaten = 0, burned = 0, pro = 0;
+  let eaten = 0, burned = 0, pro = 0, sodium = 0, sodiumCount = 0, foodCount = 0;
   for (const e of dayEntries(key)) {
-    if (e.type === 'cardio') burned += e.calories;
-    else { eaten += e.calories * e.qty; pro += e.protein * e.qty; }
+    if (e.type === 'cardio') { burned += e.calories; continue; }
+    eaten += e.calories * e.qty; pro += e.protein * e.qty; foodCount++;
+    if (e.sodium != null) { sodium += e.sodium * e.qty; sodiumCount++; }
   }
-  return { cal: eaten - burned, eaten, burned, pro };
+  return { cal: eaten - burned, eaten, burned, pro, sodium, sodiumCount, foodCount };
 }
 const foodEntries   = key => dayEntries(key).filter(e => e.type !== 'cardio');
 const cardioEntries = key => dayEntries(key).filter(e => e.type === 'cardio');
@@ -858,10 +895,10 @@ function addCardio(key, { name, calories }) {
   save();
 }
 
-function addEntry(key, { name, calories, protein, qty = 1, mealId = null }) {
+function addEntry(key, { name, calories, protein, sodium = null, qty = 1, mealId = null }) {
   if (!state.days[key]) state.days[key] = { entries: [] };
   state.days[key].entries.push({
-    id: uid(), name, calories, protein, qty,
+    id: uid(), name, calories, protein, sodium, qty,
     mealId, loggedAt: new Date().toISOString(),
   });
   save();
@@ -882,7 +919,7 @@ function activeDayKey() { return $('view-day').hidden ? todayKey() : viewDate; }
 function logMeal(mealId, qty) {
   const meal = state.library.find(m => m.id === mealId);
   if (!meal) return;
-  addEntry(activeDayKey(), { name: meal.name, calories: meal.calories, protein: meal.protein, qty, mealId });
+  addEntry(activeDayKey(), { name: meal.name, calories: meal.calories, protein: meal.protein, sodium: meal.sodium, qty, mealId });
   meal.useCount += 1;
   save();
   if (navigator.vibrate) navigator.vibrate(10); // tap feedback on Android; iOS ignores
@@ -947,7 +984,7 @@ function switchView(view) {
 
 /* ---------------- Shared: the two target bars for any day ---------------- */
 function barsHtml(key) {
-  const { cal, eaten, burned, pro } = dayTotals(key);
+  const { cal, eaten, burned, pro, sodium, sodiumCount, foodCount } = dayTotals(key);
   const calT = state.settings.calorieTarget, proT = state.settings.proteinTarget;
 
   /* Calorie bar: a CEILING on NET calories (eaten − cardio). Green under,
@@ -1001,7 +1038,18 @@ function barsHtml(key) {
       '<div class="bar-head"><span class="bar-title">Protein</span>' +
       '<span class="bar-nums">' + fmtG(pro) + ' <span class="of">/ ' + fmtG(proT) + 'g</span></span></div>' +
       proHtml +
-    '</div>');
+    '</div>' +
+    /* Sodium: informational only (no target). Shows "–" until something with
+       sodium is logged, and says so when only some meals have it entered. */
+    '<div class="sodium-row">' +
+      '<span class="bar-title">Sodium</span>' +
+      (sodiumCount > 0
+        ? '<span class="sodium-val num">' + fmt(sodium) + ' <span class="of">mg</span></span>'
+        : '<span class="sodium-val mut">–</span>') +
+    '</div>' +
+    (sodiumCount > 0 && sodiumCount < foodCount
+      ? '<div class="sodium-note">' + sodiumCount + ' of ' + foodCount + ' meals have sodium entered</div>'
+      : ''));
 }
 
 /* ---------------- Today (always the current day) ---------------- */
@@ -1079,22 +1127,30 @@ function renderEntries() {
   for (const e of food) {
     if (e.id === editingEntryId) {
       html +=
-        '<div class="entry-edit" data-id="' + e.id + '">' +
-          '<input class="ee-name" type="text" value="' + esc(e.name) + '" aria-label="Name">' +
-          '<input class="ee-cal" type="number" min="0" step="any" inputmode="decimal" value="' + e.calories + '" aria-label="Calories per 1x">' +
-          '<input class="ee-pro" type="number" min="0" step="any" inputmode="decimal" value="' + e.protein + '" aria-label="Protein grams per 1x">' +
-          '<input class="ee-qty" type="number" min="0.1" step="0.25" inputmode="decimal" value="' + e.qty + '" aria-label="Quantity">' +
-          '<button class="btn btn-sm btn-primary" type="button" data-act="entry-save">Save</button>' +
-          '<button class="btn btn-sm" type="button" data-act="entry-cancel">Cancel</button>' +
+        '<div class="entry-edit ee-food" data-id="' + e.id + '">' +
+          '<div class="field"><label>Name</label><input class="ee-name" type="text" value="' + esc(e.name) + '"></div>' +
+          '<div class="ee-grid">' +
+            '<div class="field"><label>Calories (per 1×)</label><input class="ee-cal" type="number" min="0" step="any" inputmode="decimal" value="' + e.calories + '"></div>' +
+            '<div class="field"><label>Protein g (per 1×)</label><input class="ee-pro" type="number" min="0" step="any" inputmode="decimal" value="' + e.protein + '"></div>' +
+            '<div class="field"><label>Sodium mg (per 1×)</label><input class="ee-sod" type="number" min="0" step="any" inputmode="decimal" placeholder="optional" value="' + (e.sodium ?? '') + '"></div>' +
+            '<div class="field"><label>Quantity</label><input class="ee-qty" type="number" min="0.1" step="0.25" inputmode="decimal" value="' + e.qty + '"></div>' +
+          '</div>' +
+          '<div class="ee-actions">' +
+            '<button class="btn btn-sm btn-primary" type="button" data-act="entry-save">Save</button>' +
+            '<button class="btn btn-sm" type="button" data-act="entry-cancel">Cancel</button>' +
+          '</div>' +
         '</div>';
     } else {
       const time = fmtTime(e.loggedAt, viewDate);
       html +=
         '<div class="entry-row">' +
           '<div class="entry-main">' +
-            '<div class="entry-name">' + esc(e.name) +
-              (e.qty !== 1 ? ' <span class="entry-qty">×' + e.qty + '</span>' : '') + '</div>' +
+            // quantity goes FIRST ("2× name") so the 2-line name clamp can't hide it
+            '<div class="entry-name">' + (e.qty !== 1 ? '<span class="entry-qty">' + e.qty + '×</span> ' : '') +
+              esc(e.name) + '</div>' +
             (time ? '<div class="entry-time">' + time + '</div>' : '') +
+            // own line: the name column is ~95px on a phone, too narrow to share
+            (e.sodium != null ? '<div class="entry-time">' + fmtMg(e.sodium * e.qty) + ' sodium</div>' : '') +
           '</div>' +
           '<span class="entry-cal num">' + fmt(e.calories * e.qty) + '<small> cal</small></span>' +
           '<span class="entry-pro num">' + fmtG(e.protein * e.qty) + '<small>g</small></span>' +
@@ -1171,6 +1227,7 @@ function quicklogHtml() {
           '<button class="meal-log" data-act="log" data-id="' + m.id + '">' +
             '<span class="meal-name">' + esc(m.name) + '</span>' +
             '<span class="meal-macros">' + fmt(m.calories) + ' cal · <b>' + fmtG(m.protein) + 'g</b></span>' +
+            (m.sodium != null ? '<span class="meal-sodium">' + fmtMg(m.sodium) + ' sodium</span>' : '') +
           '</button>' +
           '<button class="meal-more" data-act="qty-toggle" data-id="' + m.id + '" aria-expanded="' + (openQtyMealId === m.id) + '" aria-label="Log a different quantity of ' + esc(m.name) + '">' + I.dots + '</button>' +
         '</div>';
@@ -1225,6 +1282,7 @@ function renderLibrary() {
           '<div class="form-row">' +
             '<div class="field"><label>Calories</label><input class="le-cal" type="number" min="0" step="any" inputmode="decimal" value="' + m.calories + '"></div>' +
             '<div class="field"><label>Protein (g)</label><input class="le-pro" type="number" min="0" step="any" inputmode="decimal" value="' + m.protein + '"></div>' +
+            '<div class="field"><label>Sodium (mg)</label><input class="le-sod" type="number" min="0" step="any" inputmode="decimal" placeholder="optional" value="' + (m.sodium ?? '') + '"></div>' +
           '</div>' +
           '<div class="field"><label>Note</label><input class="le-note" type="text" value="' + esc(m.note) + '"></div>' +
           '<div class="field"><label>Meal slot</label><select class="le-tag">' +
@@ -1242,7 +1300,8 @@ function renderLibrary() {
             (m.note ? '<div class="lib-note">' + esc(m.note) + '</div>' : '') +
             '<div class="lib-meta">' + (m.tag ? '<span class="tag-pill">' + TAG_LABEL[m.tag] + '</span>' : '') + 'logged ' + m.useCount + '×</div>' +
           '</div>' +
-          '<div class="lib-macros">' + fmt(m.calories) + ' cal<br><span class="mut">' + fmtG(m.protein) + 'g protein</span></div>' +
+          '<div class="lib-macros">' + fmt(m.calories) + ' cal<br><span class="mut">' + fmtG(m.protein) + 'g protein</span>' +
+            (m.sodium != null ? '<br><span class="mut">' + fmtMg(m.sodium) + ' sodium</span>' : '') + '</div>' +
           '<button class="icon-btn" data-act="meal-edit" data-id="' + m.id + '" aria-label="Edit ' + esc(m.name) + '">' + I.edit + '</button>' +
           '<button class="icon-btn" data-act="meal-del" data-id="' + m.id + '" aria-label="Delete ' + esc(m.name) + '">' + I.del + '</button>' +
         '</div>';
@@ -1573,13 +1632,15 @@ document.addEventListener('click', e => {
         break;
       }
       const pro = toNum(form.querySelector('.ee-pro').value);
+      const sod = optNum(form.querySelector('.ee-sod').value);
       const qty = toNum(form.querySelector('.ee-qty').value, 0.01);
       const ok = flagInvalid(form.querySelector('.ee-name'), !name) &
                  flagInvalid(form.querySelector('.ee-cal'), cal == null) &
                  flagInvalid(form.querySelector('.ee-pro'), pro == null) &
+                 flagInvalid(form.querySelector('.ee-sod'), sod === undefined) &
                  flagInvalid(form.querySelector('.ee-qty'), qty == null);
       if (!ok) break;
-      Object.assign(entry, { name, calories: cal, protein: pro, qty });
+      Object.assign(entry, { name, calories: cal, protein: pro, sodium: sod, qty });
       save();
       editingEntryId = null;
       renderAfterLogChange();
@@ -1606,12 +1667,14 @@ document.addEventListener('click', e => {
       const name = form.querySelector('.le-name').value.trim();
       const cal = toNum(form.querySelector('.le-cal').value);
       const pro = toNum(form.querySelector('.le-pro').value);
+      const sod = optNum(form.querySelector('.le-sod').value);
       const ok = flagInvalid(form.querySelector('.le-name'), !name) &
                  flagInvalid(form.querySelector('.le-cal'), cal == null) &
-                 flagInvalid(form.querySelector('.le-pro'), pro == null);
+                 flagInvalid(form.querySelector('.le-pro'), pro == null) &
+                 flagInvalid(form.querySelector('.le-sod'), sod === undefined);
       if (!ok) break;
       Object.assign(meal, {
-        name, calories: cal, protein: pro,
+        name, calories: cal, protein: pro, sodium: sod,
         note: form.querySelector('.le-note').value.trim(),
         tag: form.querySelector('.le-tag').value,
       });
@@ -1693,14 +1756,16 @@ $('qa-form').addEventListener('submit', e => {
   const name = $('qa-name').value.trim();
   const cal = toNum($('qa-cal').value);
   const pro = toNum($('qa-pro').value);
-  const ok = flagInvalid($('qa-name'), !name) & flagInvalid($('qa-cal'), cal == null) & flagInvalid($('qa-pro'), pro == null);
+  const sod = optNum($('qa-sod').value);
+  const ok = flagInvalid($('qa-name'), !name) & flagInvalid($('qa-cal'), cal == null) &
+             flagInvalid($('qa-pro'), pro == null) & flagInvalid($('qa-sod'), sod === undefined);
   if (!ok) return;
   let mealId = null;
   if ($('qa-save').checked) {
     mealId = uid();
-    state.library.push({ id: mealId, name, calories: cal, protein: pro, note: '', tag: $('qa-tag').value, useCount: 1 });
+    state.library.push({ id: mealId, name, calories: cal, protein: pro, sodium: sod, note: '', tag: $('qa-tag').value, useCount: 1 });
   }
-  addEntry(activeDayKey(), { name, calories: cal, protein: pro, qty: 1, mealId });
+  addEntry(activeDayKey(), { name, calories: cal, protein: pro, sodium: sod, qty: 1, mealId });
   hideQaForm();
   renderChips();
   renderAfterLogChange();
@@ -1724,10 +1789,12 @@ $('lib-form').addEventListener('submit', e => {
   const name = $('lib-name').value.trim();
   const cal = toNum($('lib-cal').value);
   const pro = toNum($('lib-pro').value);
-  const ok = flagInvalid($('lib-name'), !name) & flagInvalid($('lib-cal'), cal == null) & flagInvalid($('lib-pro'), pro == null);
+  const sod = optNum($('lib-sod').value);
+  const ok = flagInvalid($('lib-name'), !name) & flagInvalid($('lib-cal'), cal == null) &
+             flagInvalid($('lib-pro'), pro == null) & flagInvalid($('lib-sod'), sod === undefined);
   if (!ok) return;
   state.library.push({
-    id: uid(), name, calories: cal, protein: pro,
+    id: uid(), name, calories: cal, protein: pro, sodium: sod,
     note: $('lib-note').value.trim(), tag: $('lib-tag').value, useCount: 0,
   });
   save();
